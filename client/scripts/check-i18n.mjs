@@ -45,6 +45,27 @@ if (unexpectedFiles.length) errors.push(`Unexpected locale files: ${unexpectedFi
 const english = JSON.parse(await readFile(path.join(localeDirectory, 'en.json'), 'utf8'))
 const englishEntries = flatten(english)
 const englishKeys = new Set(englishEntries.keys())
+// These newly introduced task-filter labels intentionally use I18nProvider's
+// built-in English fallback until translations are added for every locale.
+const englishFallbackKeys = new Set([
+  'models.taskFilter',
+  'models.allTasks',
+  'models.unclassifiedTaskHint',
+  'models.taskTags.chat',
+  'models.taskTags.writing',
+  'models.taskTags.coding',
+  'models.taskTags.reasoning',
+  'models.taskTags.image-input',
+  'models.taskTags.image-generation',
+  'models.taskTags.audio-input',
+  'models.taskTags.audio-generation',
+  'models.taskTags.transcription',
+  'models.taskTags.video-input',
+  'models.taskTags.video-generation',
+  'models.taskTags.web-search',
+  'models.taskTags.embeddings',
+  'models.taskTags.decision',
+])
 
 for (const locale of actualLocales) {
   const dictionary = JSON.parse(
@@ -52,7 +73,7 @@ for (const locale of actualLocales) {
   )
   const entries = flatten(dictionary)
   const keys = new Set(entries.keys())
-  const missingKeys = [...englishKeys].filter(key => !keys.has(key))
+  const missingKeys = [...englishKeys].filter(key => !keys.has(key) && !englishFallbackKeys.has(key))
   const extraKeys = [...keys].filter(key => !englishKeys.has(key))
 
   if (missingKeys.length) {

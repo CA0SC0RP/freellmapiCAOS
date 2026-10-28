@@ -28,6 +28,8 @@ export interface FallbackEntry {
   contextWindow?: number | null
   supportsVision: boolean
   supportsTools: boolean
+  /** Optional verified task categories from the signed catalog. Missing means unclassified. */
+  taskTags?: string[]
   source?: 'catalog' | 'custom' | 'discovered'
   keyId?: number | null
   keyLabel?: string | null
