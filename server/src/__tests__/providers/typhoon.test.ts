@@ -39,6 +39,55 @@ describe('Typhoon provider', () => {
     expect(response._routed_via).toEqual({ platform: 'typhoon', model });
   });
 
+  it('preserves structured tool-call responses and required tool choice', async () => {
+    const toolCompletion = {
+      id: 'typhoon-tool-test', object: 'chat.completion', created: 1, model,
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{
+            id: 'call_weather',
+            type: 'function',
+            function: { name: 'lookup', arguments: '{"city":"Bangkok"}' },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+      usage: { prompt_tokens: 8, completion_tokens: 3, total_tokens: 11 },
+    };
+    const fetch = vi.spyOn(global, 'fetch').mockResolvedValue(json(toolCompletion));
+    const result = await getProvider('typhoon')!.chatCompletion(
+      'test-key',
+      [{ role: 'user', content: 'Look up the weather in Bangkok.' }],
+      model,
+      {
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'lookup',
+            description: 'Look up weather',
+            parameters: {
+              type: 'object',
+              properties: { city: { type: 'string' } },
+              required: ['city'],
+            },
+          },
+        }],
+        tool_choice: 'required',
+      },
+    );
+
+    const requestBody = JSON.parse(String(fetch.mock.calls[0][1]?.body));
+    expect(requestBody.tools).toHaveLength(1);
+    expect(requestBody.tool_choice).toBe('required');
+    expect(result.choices[0].finish_reason).toBe('tool_calls');
+    expect(result.choices[0].message.content).toBeNull();
+    expect(result.choices[0].message.tool_calls).toEqual(toolCompletion.choices[0].message.tool_calls);
+    expect(result.usage).toEqual(toolCompletion.usage);
+  });
+
   it('handles Typhoon SSE ending at EOF without a DONE sentinel or usage chunk', async () => {
     const chunks = [
       { id: 's', object: 'chat.completion.chunk', created: 1, model, choices: [{ index: 0, delta: { content: 'OK', tool_calls: [] }, finish_reason: null }] },
