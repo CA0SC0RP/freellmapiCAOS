@@ -1,5 +1,7 @@
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { createPinnedLookup } from '../../lib/pinned-provider-fetch.js';
+import { createPinnedLookup, pinnedProviderFetch } from '../../lib/pinned-provider-fetch.js';
 import { assertProviderUrlAllowed, assessProviderUrl } from '../../lib/url-guard.js';
 
 describe('createPinnedLookup (custom-provider DNS pinning)', () => {
@@ -22,6 +24,33 @@ describe('createPinnedLookup (custom-provider DNS pinning)', () => {
     lookup('api.example.com', { all: true }, callback);
     expect(callback).toHaveBeenCalledWith(null, [{ address: '93.184.216.34', family: 4 }]);
     expect(lookups).toBe(1);
+  });
+
+  it('connects to the vetted IP while preserving the original Host header', async () => {
+    const server = createServer((request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ host: request.headers.host, url: request.url }));
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('test server did not bind a TCP port');
+
+    try {
+      const response = await pinnedProviderFetch(
+        `http://api.example.test:${address.port}/pinned-check`,
+        { method: 'GET' },
+        ['127.0.0.1'],
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        host: `api.example.test:${address.port}`,
+        url: '/pinned-check',
+      });
+    } finally {
+      server.close();
+      await once(server, 'close');
+    }
   });
 
   it('supports IPv4 and IPv6 answers while respecting the requested family', () => {
