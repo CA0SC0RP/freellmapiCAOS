@@ -133,11 +133,17 @@ describe('assessProviderUrl', () => {
     expect((await assessProviderUrl('not a url')).allowed).toBe(false);
   });
 
-  it('lets unresolvable hostnames through (checked again at request time)', async () => {
+  it('lets unresolvable hostnames through save-time validation (offline LAN endpoint)', async () => {
     const verdict = await assessProviderUrl('http://my-offline-box.lan:11434/v1', {
       resolve: async () => { throw new Error('ENOTFOUND'); },
     });
     expect(verdict.allowed).toBe(true);
+  });
+
+  it('fails closed on DNS errors during request-time enforcement', async () => {
+    const { assertProviderUrlAllowed } = await import('../../lib/url-guard.js');
+    await expect(assertProviderUrlAllowed('http://my-offline-box.lan:11434/v1'))
+      .rejects.toThrow(/could not be resolved safely/);
   });
 });
 
