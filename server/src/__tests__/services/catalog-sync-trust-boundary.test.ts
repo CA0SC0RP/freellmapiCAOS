@@ -131,7 +131,7 @@ describe('catalog sync trust boundary', () => {
     ).toEqual({ n: 1 });
     expect(
       getDb().prepare("SELECT task_tags_json FROM models WHERE model_id = 'trusted-signature-model'").get(),
-    ).toEqual({ task_tags_json: '[\"coding\",\"reasoning\"]' });
+    ).toEqual({ task_tags_json: '["coding","reasoning"]' });
   });
 
   it('rejects a catalog signed by an untrusted key and preserves the applied catalog', async () => {
