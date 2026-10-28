@@ -142,7 +142,9 @@ describe('assessProviderUrl', () => {
 
   it('fails closed on DNS errors during request-time enforcement', async () => {
     const { assertProviderUrlAllowed } = await import('../../lib/url-guard.js');
-    await expect(assertProviderUrlAllowed('http://my-offline-box.lan:11434/v1'))
+    await expect(assertProviderUrlAllowed('http://my-offline-box.lan:11434/v1', {
+      resolve: async () => { throw new Error('ENOTFOUND'); },
+    }))
       .rejects.toThrow(/could not be resolved safely/);
   });
 });
