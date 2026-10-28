@@ -75,6 +75,13 @@ function childTablesOfModels(db: Db): string[] {
 }
 
 function rebuildModels(db: Db, extraColumns: string, copiedColumns: string, unique: string): void {
+  // Later migrations may add metadata columns. Preserve them when this older
+  // reversible table-rebuild migration is exercised during a down/up cycle.
+  // Keep the historical schema unchanged for databases that predate the field.
+  const modelColumns = db.prepare('PRAGMA table_info(models)').all() as { name: string }[];
+  const hasTaskTags = modelColumns.some(column => column.name === 'task_tags_json');
+  const rebuiltColumns = hasTaskTags ? `${MODELS_COLUMNS},\n      task_tags_json TEXT NOT NULL DEFAULT '[]'` : MODELS_COLUMNS;
+  const rebuiltCopiedColumns = hasTaskTags ? `${copiedColumns}, task_tags_json` : copiedColumns;
   const children = childTablesOfModels(db);
   // AUTOINCREMENT's high-water mark. DROP TABLE takes the sqlite_sequence row
   // with it, and copying rows back only pushes the counter to the highest id
@@ -90,11 +97,11 @@ function rebuildModels(db: Db, extraColumns: string, copiedColumns: string, uniq
   }
 
   db.exec(`
-    CREATE TABLE models_endpoint_identity (${MODELS_COLUMNS}${extraColumns},
+    CREATE TABLE models_endpoint_identity (${rebuiltColumns}${extraColumns},
       ${unique}
     );
-    INSERT INTO models_endpoint_identity (${copiedColumns})
-      SELECT ${copiedColumns} FROM models;
+    INSERT INTO models_endpoint_identity (${rebuiltCopiedColumns})
+      SELECT ${rebuiltCopiedColumns} FROM models;
     DROP TABLE models;
     ALTER TABLE models_endpoint_identity RENAME TO models;
   `);
