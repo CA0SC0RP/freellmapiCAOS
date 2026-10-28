@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createPinnedLookup } from '../../lib/pinned-provider-fetch.js';
 
 describe('createPinnedLookup (custom-provider DNS pinning)', () => {
