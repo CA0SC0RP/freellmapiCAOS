@@ -78,8 +78,8 @@ describe('POST /api/keys/import-selected — model lists (#382)', () => {
     // DNS lookup of the fake relay.example.com host. CI resolvers can take
     // seconds on that NXDOMAIN — past the 5s test timeout — and the abandoned
     // handler then leaks a fetch call into the next test's mock. Fail the
-    // lookup immediately; the guard treats an unresolvable host as allowed.
-    vi.spyOn(dns.promises, 'lookup').mockRejectedValue(new Error('dns disabled in tests'));
+    // lookup immediately; custom-provider tests use a deterministic public DNS answer.
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
     const db = getDb();
     db.prepare("DELETE FROM fallback_config WHERE model_db_id IN (SELECT id FROM models WHERE platform = 'custom')").run();
     db.prepare("DELETE FROM models WHERE platform = 'custom'").run();
