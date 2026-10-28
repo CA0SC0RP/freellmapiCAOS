@@ -59,6 +59,26 @@ describe('custom-provider pinned transport routing', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('cancels redirect bodies so the request-scoped transport can close', async () => {
+    let cancelled = false;
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('redirect body'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(upstreamBody, {
+      status: 302,
+      headers: { location: 'http://127.0.0.1:8080/private' },
+    }));
+
+    await expect(proxyFetch(publicIpUrl, { method: 'GET' }, 'custom'))
+      .rejects.toThrow(/redirected \(302\)/);
+    expect(cancelled).toBe(true);
+  });
+
   it('blocks a per-key proxy before credentials or payload can be sent', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
