@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { isIP } from 'node:net';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import {
@@ -129,7 +130,10 @@ function isLoopbackAddress(value: string | undefined): boolean {
   // Node reports IPv4 loopback over a dual-stack socket as "::ffff:127.0.0.1".
   if (addr.startsWith('::ffff:')) addr = addr.slice(7);
   if (addr === '::1') return true;
-  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(addr);
+  // Validate the full IPv4 syntax before trusting a loopback prefix. A loose
+  // regex also accepted impossible addresses such as 127.999.999.999 from an
+  // attacker-controlled forwarded header.
+  return isIP(addr) === 4 && Number(addr.split('.')[0]) === 127;
 }
 
 // Is the caller connecting from the local machine? The socket peer address is
