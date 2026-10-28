@@ -6,6 +6,7 @@ describe('OpenAICompatProvider', () => {
   let provider: OpenAICompatProvider;
 
   beforeEach(() => {
+  vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
     provider = new OpenAICompatProvider({
       platform: 'groq',
       name: 'TestProvider',
