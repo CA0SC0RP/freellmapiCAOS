@@ -20,6 +20,7 @@ import { SEARCH_PLATFORMS as SHARED_SEARCH_PLATFORMS } from '../../../../shared/
 import { SEARCH_PLATFORMS } from '../../lib/search-platforms.js';
 import { seedSearchEngines } from '../helpers/search-engines.js';
 import { clearLastHealthyStampState } from '../../services/health.js';
+import dns from 'node:dns';
 
 const realFetch = globalThis.fetch;
 
@@ -72,6 +73,7 @@ describe('search platforms', () => {
 
 describe('search service', () => {
   beforeEach(() => {
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     seedSearchEngines();
