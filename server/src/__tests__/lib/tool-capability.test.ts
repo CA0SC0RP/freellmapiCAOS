@@ -60,6 +60,22 @@ describe('tool capability rejection memory', () => {
     expect(isToolBenched(platform, model, endpoint, now + TOOL_REJECTION_LIMIT + 3)).toBe(false);
   });
 
+  it('keeps rejection evidence isolated by platform and model', () => {
+    const now = 60_000;
+    const otherPlatformKey = toolCapabilityKey('other-platform', model, endpoint);
+    const otherModelKey = toolCapabilityKey(platform, 'different-model', endpoint);
+    benchForTools(key(), now);
+
+    expect(isToolBenched(platform, model, endpoint, now + 1)).toBe(true);
+    expect(isToolBenched('other-platform', model, endpoint, now + 1)).toBe(false);
+    expect(isToolBenched(platform, 'different-model', endpoint, now + 1)).toBe(false);
+
+    // Evidence written under other identities must not clear or extend this bench.
+    noteToolRejection(otherPlatformKey, now + 2);
+    noteToolRejection(otherModelKey, now + 3);
+    expect(isToolBenched(platform, model, endpoint, now + 4)).toBe(true);
+  });
+
   it('keeps evidence isolated by endpoint scope', () => {
     const now = 50_000;
     const otherEndpoint = 'https://other-relay.example/v1';
