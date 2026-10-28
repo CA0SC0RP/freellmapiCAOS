@@ -28,12 +28,12 @@ import net from 'node:net';
 // guard, so a public base_url answering 302 → an internal address would
 // otherwise defeat every check in this file.
 //
-// Known limitation: hostnames are resolved and classified here, but the
-// actual fetch re-resolves DNS, so a hostile authoritative DNS server could
-// still rebind between check and use. Pinning the resolved address into the
-// dispatcher is the follow-up hardening step; the always-blocked classes
-// above are also re-checked at request time (proxyFetch) which narrows the
-// window to deliberate rebinding rather than casual misuse.
+// Request-time callers receive the exact vetted address set and the direct
+// custom-provider transport pins its socket lookup to that set. Proxy/SOCKS/
+// relay routes are rejected for custom providers because this process cannot
+// constrain destination resolution performed by those remote hops. Keep this
+// module's return value coupled to the transport; never re-resolve after this
+// assessment.
 
 export type AddressClass = 'metadata' | 'link-local' | 'loopback' | 'private' | 'public';
 
