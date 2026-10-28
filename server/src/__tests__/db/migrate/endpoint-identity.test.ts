@@ -197,7 +197,8 @@ describe('custom model endpoint identity migration', () => {
       await runMigrations(db, 'up');
       // Seed task metadata before exercising this older migration's rebuild.
       // The down/up cycle must preserve columns introduced by later migrations.
-      db.prepare("UPDATE models SET task_tags_json = '[\\"coding\\",\\"reasoning\\"]' WHERE model_id = 'deepseek-v3.1'").run();
+      db.prepare('UPDATE models SET task_tags_json = ? WHERE model_id = ?')
+        .run('["coding","reasoning"]', 'deepseek-v3.1');
       const afterFirstUp = db.prepare('SELECT * FROM models ORDER BY id').all();
       const schemaAfterFirstUp = db.prepare(
         "SELECT sql FROM sqlite_master WHERE name = 'models'",
