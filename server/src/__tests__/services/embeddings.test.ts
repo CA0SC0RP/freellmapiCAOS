@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import dns from 'node:dns';
 import type { MockedFunction } from 'vitest';
 import { initDb, getDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
@@ -42,6 +43,7 @@ function mockFetch(impl: typeof fetch): MockedFunction<typeof fetch> {
 
 describe('embeddings service', () => {
   beforeEach(() => {
+  vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
   });
