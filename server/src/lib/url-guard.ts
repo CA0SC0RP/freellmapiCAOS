@@ -184,6 +184,9 @@ export interface AssessOptions {
   resolve?: (hostname: string) => Promise<string[]>;
   // Overrides the env flag; when true, loopback/private addresses are blocked.
   blockPrivate?: boolean;
+  // Request-time checks fail closed on DNS errors; save-time checks may allow
+  // offline local endpoints to be stored and will be repeated before use.
+  failOnResolutionError?: boolean;
 }
 
 async function defaultResolve(hostname: string): Promise<string[]> {
@@ -226,11 +229,18 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
     try {
       addresses = await (opts.resolve ?? defaultResolve)(hostname);
     } catch {
-      // Unresolvable now may resolve later (device not on the LAN yet, DNS
-      // hiccup). Saving is harmless — the request-time check runs again.
-      return { allowed: true };
+      // Save-time validation may permit offline local endpoints to be stored.
+      // At request time, a DNS failure must fail closed: fetch() would resolve
+      // the hostname independently, leaving a DNS-rebinding/TOCTOU gap.
+      return opts.failOnResolutionError
+        ? { allowed: false, reason: 'hostname could not be resolved safely' }
+        : { allowed: true };
     }
-    if (addresses.length === 0) return { allowed: true };
+    if (addresses.length === 0) {
+      return opts.failOnResolutionError
+        ? { allowed: false, reason: 'hostname resolved to no addresses' }
+        : { allowed: true };
+    }
   }
 
   const blockPrivate = opts.blockPrivate ?? blockPrivateEnabled();
@@ -259,7 +269,7 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
  * blocked address class.
  */
 export async function assertProviderUrlAllowed(rawUrl: string): Promise<void> {
-  const verdict = await assessProviderUrl(rawUrl);
+  const verdict = await assessProviderUrl(rawUrl, { failOnResolutionError: true });
   if (!verdict.allowed) {
     throw new Error(`Custom provider URL blocked: ${verdict.reason}`);
   }
