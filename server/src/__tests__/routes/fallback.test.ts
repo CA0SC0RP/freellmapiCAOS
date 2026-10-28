@@ -64,6 +64,26 @@ describe('Fallback API', () => {
     expect(first).toHaveProperty('contextWindow');
   });
 
+  it('GET /api/fallback preserves tool capability separately from task tags', async () => {
+    const db = getDb();
+    const row = db.prepare(`
+      SELECT id, supports_tools, task_tags_json FROM models
+       ORDER BY id LIMIT 1
+    `).get() as { id: number; supports_tools: number; task_tags_json: string | null };
+    const original = { supportsTools: row.supports_tools, taskTags: row.task_tags_json };
+    try {
+      db.prepare('UPDATE models SET supports_tools = 1, task_tags_json = ? WHERE id = ?')
+        .run(JSON.stringify(['coding']), row.id);
+      const { status, body } = await request(app, 'GET', '/api/fallback');
+      expect(status).toBe(200);
+      const entry = body.find((item: { modelDbId: number }) => item.modelDbId === row.id);
+      expect(entry).toMatchObject({ supportsTools: true, taskTags: ['coding'] });
+    } finally {
+      db.prepare('UPDATE models SET supports_tools = ?, task_tags_json = ? WHERE id = ?')
+        .run(original.supportsTools, original.taskTags, row.id);
+    }
+  });
+
   it('GET /api/fallback/token-usage reports per-model chat usage for configured platforms', async () => {
     const db = getDb();
     const target = db.prepare(`
