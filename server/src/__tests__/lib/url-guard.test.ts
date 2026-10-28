@@ -134,6 +134,14 @@ describe('assessProviderUrl', () => {
     expect((await assessProviderUrl('not a url')).allowed).toBe(false);
   });
 
+  it('rejects a mixed public and metadata DNS answer set', async () => {
+    const verdict = await assessProviderUrl('https://api.example.com/v1', {
+      resolve: async () => ['93.184.216.34', '169.254.169.254'],
+    });
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toMatch(/metadata/);
+  });
+
   it('rejects malformed addresses returned by DNS instead of treating them as public', async () => {
     const verdict = await assessProviderUrl('https://api.example.com/v1', {
       resolve: async () => ['not-an-ip'],
