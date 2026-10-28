@@ -125,12 +125,21 @@ describe('assessProviderUrl', () => {
       resolve: async () => ['93.184.216.34'],
     });
     expect(verdict.allowed).toBe(true);
+    expect(verdict.addresses).toEqual(['93.184.216.34']);
   });
 
   it('rejects non-http(s) protocols and malformed URLs', async () => {
     expect((await assessProviderUrl('ftp://example.com/v1')).allowed).toBe(false);
     expect((await assessProviderUrl('file:///etc/passwd')).allowed).toBe(false);
     expect((await assessProviderUrl('not a url')).allowed).toBe(false);
+  });
+
+  it('rejects malformed addresses returned by DNS instead of treating them as public', async () => {
+    const verdict = await assessProviderUrl('https://api.example.com/v1', {
+      resolve: async () => ['not-an-ip'],
+    });
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toMatch(/malformed IP/);
   });
 
   it('lets unresolvable hostnames through save-time validation (offline LAN endpoint)', async () => {
