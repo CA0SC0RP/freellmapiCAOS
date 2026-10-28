@@ -207,7 +207,7 @@ describe('custom model endpoint identity migration', () => {
       endpointIdentityUp(db);
       expect(db.prepare('SELECT * FROM models ORDER BY id').all()).toEqual(afterFirstUp);
       expect((db.prepare("SELECT sql FROM sqlite_master WHERE name = 'models'").get() as { sql: string }).sql)
-        .toBe(schemaAfterFirstUp.sql);
+        .toBe(schemaAfterFirstUp.sql.replace(/\s+/g, ' ').trim());
       expect(db.pragma('foreign_key_check')).toEqual([]);
 
       // With a real duplicate on the books, down() has no honest answer.
