@@ -76,6 +76,29 @@ function lockoutRetryAfterSec(email: string, now = Date.now()): number {
   if (!a || a.lockedUntil <= now) return 0;
   return Math.max(1, Math.ceil((a.lockedUntil - now) / 1000));
 }
+function hasCapacityFor(email: string, now = Date.now()): boolean {
+  const key = throttleKey(email);
+  if (attempts.has(key)) return true;
+
+  // Partial-attempt buckets are immediately reusable; expired lockouts are
+  // also safe to remove. Never evict a live lockout just to admit a new key.
+  for (const [tracked, state] of attempts) {
+    if (state.lockedUntil <= now) attempts.delete(tracked);
+  }
+  if (attempts.size < MAX_TRACKED_EMAILS) return true;
+
+  return false;
+}
+
+function capacityRetryAfterSec(now = Date.now()): number {
+  let earliestUnlock = Number.POSITIVE_INFINITY;
+  for (const state of attempts.values()) {
+    if (state.lockedUntil > now) earliestUnlock = Math.min(earliestUnlock, state.lockedUntil);
+  }
+  if (!Number.isFinite(earliestUnlock)) return 1;
+  return Math.max(1, Math.ceil((earliestUnlock - now) / 1000));
+}
+
 function recordFailure(email: string): void {
   const key = throttleKey(email);
   const a = attempts.get(key) ?? { count: 0, lockedUntil: 0 };
@@ -247,6 +270,15 @@ authRouter.post('/login', (req: Request, res: Response) => {
     return;
   }
   const { email, password } = parsed.data;
+
+  // Under a high-cardinality login flood, refuse new identifiers rather than
+  // growing the in-memory map or evicting active account lockouts.
+  if (!attempts.has(throttleKey(email)) && !hasCapacityFor(email)) {
+    const retryAfter = capacityRetryAfterSec();
+    res.setHeader('Retry-After', String(retryAfter));
+    res.status(429).json({ error: { message: 'Login throttling capacity reached. Retry later.', type: 'rate_limit_error' } });
+    return;
+  }
 
   if (isLockedOut(email)) {
     // RFC 6585: a 429 must say when the client may return. The whole gateway
