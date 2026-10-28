@@ -376,6 +376,7 @@ export function catalogShapeProblems(value: unknown): string[] {
       if (!str(m?.displayName)) return 'displayName is not a string';
       if (!bool(m?.enabled)) return 'enabled is not a boolean';
       if (!nulStr(m?.requestStyle)) return 'requestStyle is not a string';
+      if (m?.taskTags !== undefined && m?.modality !== undefined && m.modality !== 'text') return 'taskTags are only supported for text/chat models';
       if (m?.taskTags !== undefined && !(Array.isArray(m.taskTags) && m.taskTags.every((tag: unknown) => typeof tag === 'string' && MODEL_TASK_TAGS.has(tag)))) return 'taskTags contains an unknown or non-string tag';
       if (!m?.limits || typeof m.limits !== 'object') return 'limits is missing';
       return null;
@@ -535,7 +536,8 @@ function applyCatalogInner(db: Db, catalog: Catalog): NonNullable<SyncResult['co
                         enabled, supports_vision, supports_tools, task_tags_json, source)
     VALUES (@platform, @modelId, @displayName, @intelligenceRank, @speedRank, @sizeLabel,
             @rpm, @rpd, @tpm, @tpd, @monthlyTokenBudget, @contextWindow,
-            @enabled, @supportsVision, @supportsTools, @taskTags, 'catalog')
+            @enabled, @supportsVision, @supportsTools,
+            CASE WHEN @taskTagsPresent = 1 THEN @taskTags ELSE '[]' END, 'catalog')
   `);
 
   // Generative-media models go to their own table (never the chat router's pool).
