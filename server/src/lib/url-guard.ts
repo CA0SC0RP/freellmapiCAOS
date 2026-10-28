@@ -268,8 +268,13 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
  * (older install, direct DB edit, DNS change after save) still can't reach a
  * blocked address class.
  */
-export async function assertProviderUrlAllowed(rawUrl: string): Promise<void> {
-  const verdict = await assessProviderUrl(rawUrl, { failOnResolutionError: true });
+export async function assertProviderUrlAllowed(
+  rawUrl: string,
+  options: Omit<AssessOptions, 'failOnResolutionError'> = {},
+): Promise<void> {
+  // Request-time enforcement must always fail closed; options only allow tests
+  // and internal callers to provide a deterministic resolver.
+  const verdict = await assessProviderUrl(rawUrl, { ...options, failOnResolutionError: true });
   if (!verdict.allowed) {
     throw new Error(`Custom provider URL blocked: ${verdict.reason}`);
   }
