@@ -62,6 +62,7 @@ describe('catalog sync trust boundary', () => {
   it('does not apply a catalog when the network request fails', async () => {
     process.env.CATALOG_BASE_URL = 'https://catalog.test';
     setSetting('catalog_applied_version', '2026.10.01');
+    setSetting('catalog_applied_tier', 'monthly');
 
     const fetchMock = vi.fn().mockRejectedValue(new Error('simulated network outage'));
     vi.stubGlobal('fetch', fetchMock);
@@ -71,5 +72,6 @@ describe('catalog sync trust boundary', () => {
     expect(result).toMatchObject({ ok: false, action: 'error' });
     expect((result as { detail?: string }).detail).toContain('simulated network outage');
     expect(getSetting('catalog_applied_version')).toBe('2026.10.01');
+    expect(getSetting('catalog_applied_tier')).toBe('monthly');
   });
 });
