@@ -61,7 +61,7 @@ describe('a served non-chat request marks its key as working (#1493, #1612)', ()
   });
 
   it('embeddings: a served embedding promotes an unknown key', async () => {
-    const keyId = addKey('custom', 'unknown', 'https://embeddings.example/v1');
+    const keyId = addKey('custom', 'unknown', 'https://93.184.216.34/v1');
     getDb().prepare(`INSERT INTO embedding_models (family, platform, model_id, display_name, dimensions, priority, enabled, quota_label, key_id)
       VALUES ('probe-embed', 'custom', 'probe-embed', 'Probe embedding', 2, 1, 1, '', ?)`).run(keyId);
     mockFetch(() => new Response(JSON.stringify({
@@ -74,7 +74,7 @@ describe('a served non-chat request marks its key as working (#1493, #1612)', ()
   });
 
   it('embeddings: a failed embedding does not', async () => {
-    const keyId = addKey('custom', 'unknown', 'https://embeddings.example/v1');
+    const keyId = addKey('custom', 'unknown', 'https://93.184.216.34/v1');
     getDb().prepare(`INSERT INTO embedding_models (family, platform, model_id, display_name, dimensions, priority, enabled, quota_label, key_id)
       VALUES ('probe-embed', 'custom', 'probe-embed', 'Probe embedding', 2, 1, 1, '', ?)`).run(keyId);
     mockFetch(() => new Response('boom', { status: 500 }));
