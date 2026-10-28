@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import dns from 'node:dns';
 import { OpenAICompatProvider, inBandCreditsError } from '../../providers/openai-compat.js';
 
 describe('OpenAICompatProvider', () => {
@@ -1281,6 +1282,10 @@ describe('pinned tool_choice retry on custom endpoints (#1548)', () => {
 });
 
 describe('OpenCode session header (#1639)', () => {
+  beforeEach(() => {
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
