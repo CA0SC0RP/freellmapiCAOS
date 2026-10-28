@@ -645,15 +645,12 @@ describe('local and LAN destinations bypass the proxy (#951)', () => {
     const httpsSpy = stubHttpsRequest();
     const httpSpy = stubHttpRequest();
     await proxyFetch(url, { method: 'POST' }, 'custom');
-    // A SOCKS route never touches fetch(): it goes out through http/https.request
-    // with a SocksProxyAgent attached.
-    if (httpsSpy.mock.calls.length + httpSpy.mock.calls.length > 0) {
-      expect(fetchSpy).not.toHaveBeenCalled();
-      return 'proxied';
-    }
+    // Custom-provider direct requests must use the request-scoped DNS-pinned
+    // dispatcher. A proxy route is intentionally rejected before dispatch.
+    expect(httpsSpy).not.toHaveBeenCalled();
+    expect(httpSpy).not.toHaveBeenCalled();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    // Direct means no dispatcher was injected either.
-    expect((fetchSpy.mock.calls[0]?.[1] as any)?.dispatcher).toBeUndefined();
+    expect((fetchSpy.mock.calls[0]?.[1] as any)?.dispatcher).toBeDefined();
     return 'direct';
   };
 
@@ -692,33 +689,52 @@ describe('local and LAN destinations bypass the proxy (#951)', () => {
     expect((reqSpy.mock.calls[0][0] as any).agent?.proxy?.port).toBe(9050);
   });
 
-  it('applies to the per-key proxy path too', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(okResponse());
+  it('blocks a per-key proxy for custom providers before dispatch', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch');
     const httpsSpy = stubHttpsRequest();
     const httpSpy = stubHttpRequest();
 
-    await withKeyProxy('socks5h://127.0.0.1:9051', () =>
-      proxyFetch('http://192.168.1.20:11434/api/chat', { method: 'POST' }, 'custom'));
+    await expect(withKeyProxy('socks5h://127.0.0.1:9051', () =>
+      proxyFetch('http://192.168.1.20:11434/api/chat', {
+        method: 'POST',
+        headers: { authorization: 'Bearer test-secret' },
+        body: '{"secret":"payload"}',
+      }, 'custom'))).rejects.toThrow(/cannot guarantee DNS-pinned upstream connections/);
 
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(httpsSpy).not.toHaveBeenCalled();
     expect(httpSpy).not.toHaveBeenCalled();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect((fetchSpy.mock.calls[0]?.[1] as any)?.dispatcher).toBeUndefined();
   });
 
   // The `ssh -D` case: the tunnel's far end is where 127.0.0.1:11434 is meant
   // to resolve, so the operator can force local destinations back through it.
   describe('FREEAPI_PROXY_LOCAL_DESTINATIONS opt-out', () => {
-    it('routes loopback through the proxy when set', async () => {
+    it('fails closed rather than sending a custom-provider loopback request through the proxy', async () => {
       process.env.FREEAPI_PROXY_LOCAL_DESTINATIONS = 'true';
       applyProxyUrl('socks5h://127.0.0.1:9050');
-      expect(await routeOf('http://127.0.0.1:11434/api/chat')).toBe('proxied');
+      const fetchSpy = vi.spyOn(global, 'fetch');
+      const httpsSpy = stubHttpsRequest();
+      const httpSpy = stubHttpRequest();
+
+      await expect(proxyFetch('http://127.0.0.1:11434/api/chat', { method: 'POST', body: '{"secret":"payload"}' }, 'custom'))
+        .rejects.toThrow(/cannot guarantee DNS-pinned upstream connections/);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(httpsSpy).not.toHaveBeenCalled();
+      expect(httpSpy).not.toHaveBeenCalled();
     });
 
-    it('routes a LAN address through the proxy when set', async () => {
+    it('fails closed rather than sending a custom-provider LAN request through the proxy', async () => {
       process.env.FREEAPI_PROXY_LOCAL_DESTINATIONS = '1';
       applyProxyUrl('socks5h://127.0.0.1:9050');
-      expect(await routeOf('http://192.168.1.20:11434/api/chat')).toBe('proxied');
+      const fetchSpy = vi.spyOn(global, 'fetch');
+      const httpsSpy = stubHttpsRequest();
+      const httpSpy = stubHttpRequest();
+
+      await expect(proxyFetch('http://192.168.1.20:11434/api/chat', { method: 'POST', body: '{"secret":"payload"}' }, 'custom'))
+        .rejects.toThrow(/cannot guarantee DNS-pinned upstream connections/);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(httpsSpy).not.toHaveBeenCalled();
+      expect(httpSpy).not.toHaveBeenCalled();
     });
 
     it('is ignored when set to a non-truthy value', async () => {
