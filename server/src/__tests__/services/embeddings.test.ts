@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import dns from 'node:dns';
 import type { MockedFunction } from 'vitest';
+import dns from 'node:dns';
 import { initDb, getDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { resolveFamily, getDefaultFamily, runEmbeddings } from '../../services/embeddings.js';
