@@ -846,15 +846,18 @@ export async function proxyFetch(
       // Undici dispatcher pinned to this exact vetted answer set.
       const bypass = shouldBypassProxy(url, platform);
       const perKeyUrl = perKeyProxyStore.getStore() ?? '';
-      const wouldUseProxy = !bypass && (
-        Boolean(perKeyUrl) ||
-        Boolean(_proxyUrl && _proxyMode === 'fetch-relay') ||
-        Boolean(_proxyUrl)
-      );
+      const wouldUseProxy = !bypass && Boolean(perKeyUrl || _proxyUrl);
       if (wouldUseProxy) {
         throw new Error(
           'Custom provider URL blocked: configured proxy/SOCKS/Fetch Relay cannot guarantee DNS-pinned upstream connections; use a direct route or disable proxy routing for this custom provider',
         );
+      }
+      // Preserve the opt-in no-direct-egress contract: pinning is not a reason
+      // to bypass an operator's mandatory-proxy policy.
+      if (requiresOutboundProxy(platform)) {
+        throw proxyRequiredError(platform, bypass
+          ? 'proxy routing disabled or bypassed; pinned custom-provider transport cannot use the configured proxy'
+          : 'custom-provider DNS pinning requires a direct route');
       }
       // Redirects are never followed for custom providers; the same pinned
       // transport must be used for exactly this origin and vetted address set.
@@ -866,6 +869,9 @@ export async function proxyFetch(
 
     if (platform === 'custom' && REDIRECT_STATUSES.has(response.status)) {
       const location = response.headers.get('location') ?? 'an unspecified location';
+      // The redirect body is never returned to the caller. Cancel it so the
+      // request-scoped pinned dispatcher is closed rather than left alive.
+      await response.body?.cancel().catch(() => undefined);
       throw new Error(
         `Custom provider URL blocked: upstream redirected (${response.status}) to ${location}; ` +
         'redirects are not followed for custom providers, point base_url directly at the API',
