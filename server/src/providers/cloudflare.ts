@@ -37,7 +37,11 @@ export class CloudflareProvider extends BaseProvider {
 
   private parseKey(apiKey: string): { accountId: string; token: string } {
     const sep = apiKey.indexOf(':');
-    if (sep === -1) throw new Error('Cloudflare key must be in format "account_id:api_token"');
+    if (sep <= 0 || sep === apiKey.length - 1
+      || apiKey.slice(0, sep).trim().length === 0
+      || apiKey.slice(sep + 1).trim().length === 0) {
+      throw new Error('Cloudflare key must be in format "account_id:api_token"');
+    }
     return { accountId: apiKey.slice(0, sep), token: apiKey.slice(sep + 1) };
   }
 
