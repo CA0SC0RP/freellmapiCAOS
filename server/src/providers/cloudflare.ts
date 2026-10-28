@@ -37,12 +37,16 @@ export class CloudflareProvider extends BaseProvider {
 
   private parseKey(apiKey: string): { accountId: string; token: string } {
     const sep = apiKey.indexOf(':');
+    const accountId = apiKey.slice(0, sep);
+    const token = apiKey.slice(sep + 1);
     if (sep <= 0 || sep === apiKey.length - 1
-      || apiKey.slice(0, sep).trim().length === 0
-      || apiKey.slice(sep + 1).trim().length === 0) {
+      || accountId.trim().length === 0
+      || token.trim().length === 0
+      || accountId !== accountId.trim()
+      || token !== token.trim()) {
       throw new Error('Cloudflare key must be in format "account_id:api_token"');
     }
-    return { accountId: apiKey.slice(0, sep), token: apiKey.slice(sep + 1) };
+    return { accountId, token };
   }
 
   // Cloudflare's OpenAI-compat endpoint:
