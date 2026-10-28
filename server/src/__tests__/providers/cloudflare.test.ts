@@ -120,6 +120,16 @@ describe('CloudflareProvider', () => {
     ).rejects.toThrow(/account_id:api_token/);
   });
 
+  it.each([':token', 'account:', ':', '   :token', 'account:   '])(
+    'rejects malformed key with an empty account or token (%s)', async (key) => {
+      const fetchSpy = vi.spyOn(global, 'fetch');
+      await expect(
+        provider.chatCompletion(key, [{ role: 'user', content: 'Hi' }], 'model')
+      ).rejects.toThrow(/account_id:api_token/);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    },
+  );
+
   describe('validateKey', () => {
     it('validates via /user/tokens/verify when the token is user-scoped', async () => {
       const calls: string[] = [];
