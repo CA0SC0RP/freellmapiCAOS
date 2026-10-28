@@ -60,6 +60,51 @@ describe('catalog sync trust boundary', () => {
     ).toEqual({ n: 0 });
   });
 
+  it('accepts a correctly signed catalog from the configured trusted key', async () => {
+    process.env.CATALOG_BASE_URL = 'https://catalog.test';
+    setSetting('catalog_applied_version', '2026.10.01');
+    setSetting('catalog_applied_tier', 'monthly');
+
+    const crypto = await import('node:crypto');
+    const trusted = crypto.generateKeyPairSync('ed25519');
+    process.env.CATALOG_PUBKEY = trusted.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const payload = {
+      version: '2099.01.01',
+      generatedAt: new Date().toISOString(),
+      tier: 'live',
+      models: [{
+        platform: 'groq',
+        modelId: 'trusted-signature-model',
+        displayName: 'Trusted Signature Model',
+        intelligenceRank: 1,
+        speedRank: 1,
+        sizeLabel: 'Small',
+        limits: { rpm: 1, rpd: 1, tpm: 1, tpd: 1 },
+        monthlyTokenBudget: null,
+        contextWindow: 1024,
+        enabled: true,
+        supportsVision: false,
+        supportsTools: false,
+      }],
+      quirks: [],
+    };
+    const bytes = Buffer.from(JSON.stringify(payload));
+    const signature = crypto.sign(null, bytes, trusted.privateKey).toString('base64');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(bytes, {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'x-catalog-signature': signature },
+    })));
+
+    const result = await syncCatalog(true);
+
+    expect(result).toMatchObject({ ok: true, action: 'applied', version: '2099.01.01' });
+    expect(getSetting('catalog_applied_version')).toBe('2099.01.01');
+    expect(getSetting('catalog_applied_tier')).toBe('live');
+    expect(
+      getDb().prepare("SELECT COUNT(*) AS n FROM models WHERE model_id = 'trusted-signature-model'").get(),
+    ).toEqual({ n: 1 });
+  });
+
   it('rejects a catalog signed by an untrusted key and preserves the applied catalog', async () => {
     process.env.CATALOG_BASE_URL = 'https://catalog.test';
     setSetting('catalog_applied_version', '2026.10.01');
