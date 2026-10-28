@@ -34,6 +34,10 @@ function parseLimit(): number {
 export function createProxyRateLimiter(rpmLimit?: number) {
   const limit = rpmLimit !== undefined ? Math.floor(Math.max(0, rpmLimit)) : parseLimit();
   const windows = new Map<string, WindowState>();
+  // Once the per-IP table is full, unknown IPs share one bounded overflow
+  // bucket. This fails closed under high-cardinality traffic without evicting
+  // active clients' counters or allowing attackers to reset their own limits.
+  let overflowState: WindowState | undefined;
 
   return function proxyRateLimit(req: Request, res: Response, next: NextFunction): void {
     if (limit === 0) {
@@ -45,17 +49,27 @@ export function createProxyRateLimiter(rpmLimit?: number) {
     const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
 
     let state = windows.get(ip);
-    if (!state || now >= state.resetAt) {
+    if (!state) {
+      // Reclaim expired buckets before deciding whether to use overflow.
+      if (windows.size >= MAX_TRACKED_IPS) {
+        for (const [key, value] of windows) {
+          if (now >= value.resetAt) windows.delete(key);
+        }
+      }
+      if (windows.size >= MAX_TRACKED_IPS) {
+        if (!overflowState || now >= overflowState.resetAt) {
+          overflowState = { count: 0, resetAt: now + WINDOW_MS };
+        }
+        state = overflowState;
+      } else {
+        state = { count: 0, resetAt: now + WINDOW_MS };
+        windows.set(ip, state);
+      }
+    } else if (now >= state.resetAt) {
       state = { count: 0, resetAt: now + WINDOW_MS };
       windows.set(ip, state);
     }
     state.count += 1;
-
-    if (windows.size > MAX_TRACKED_IPS) {
-      for (const [key, value] of windows) {
-        if (now >= value.resetAt) windows.delete(key);
-      }
-    }
 
     res.setHeader('X-RateLimit-Limit', String(limit));
     res.setHeader('X-RateLimit-Remaining', String(Math.max(0, limit - state.count)));
@@ -101,6 +115,9 @@ function parseAdminLimit(): number {
 export function createAdminRateLimiter(rpm?: number) {
   const limit = rpm !== undefined ? Math.floor(Math.max(0, rpm)) : parseAdminLimit();
   const windows = new Map<string, WindowState>();
+  // Share a bounded overflow bucket rather than growing memory or evicting
+  // active per-IP counters when many unique addresses arrive in one window.
+  let overflowState: WindowState | undefined;
 
   return function adminRateLimit(req: Request, res: Response, next: NextFunction): void {
     if (limit === 0) {
@@ -112,17 +129,26 @@ export function createAdminRateLimiter(rpm?: number) {
     const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
 
     let state = windows.get(ip);
-    if (!state || now >= state.resetAt) {
+    if (!state) {
+      if (windows.size >= MAX_TRACKED_IPS) {
+        for (const [key, value] of windows) {
+          if (now >= value.resetAt) windows.delete(key);
+        }
+      }
+      if (windows.size >= MAX_TRACKED_IPS) {
+        if (!overflowState || now >= overflowState.resetAt) {
+          overflowState = { count: 0, resetAt: now + WINDOW_MS };
+        }
+        state = overflowState;
+      } else {
+        state = { count: 0, resetAt: now + WINDOW_MS };
+        windows.set(ip, state);
+      }
+    } else if (now >= state.resetAt) {
       state = { count: 0, resetAt: now + WINDOW_MS };
       windows.set(ip, state);
     }
     state.count += 1;
-
-    if (windows.size > MAX_TRACKED_IPS) {
-      for (const [key, value] of windows) {
-        if (now >= value.resetAt) windows.delete(key);
-      }
-    }
 
     res.setHeader('X-RateLimit-Limit', String(limit));
     res.setHeader('X-RateLimit-Remaining', String(Math.max(0, limit - state.count)));
