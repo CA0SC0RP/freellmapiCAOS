@@ -8,6 +8,7 @@ import { runRerank } from '../../services/rerank.js';
 import { runDecision } from '../../services/decision.js';
 import { runImageGeneration } from '../../services/media.js';
 import { seedDecisionModels } from '../helpers/decision-models.js';
+import dns from 'node:dns';
 
 // A served request is the strongest "this key works" evidence there is, and
 // every surface that spends a key from the 'healthy'/'unknown' pool must act
@@ -47,6 +48,7 @@ function mockFetch(handler: (url: string, init: RequestInit) => Response) {
 
 describe('a served non-chat request marks its key as working (#1493, #1612)', () => {
   beforeEach(() => {
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     clearAllCooldowns(Number.MAX_SAFE_INTEGER);
