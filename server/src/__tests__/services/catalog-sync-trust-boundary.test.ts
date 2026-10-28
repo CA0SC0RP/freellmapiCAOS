@@ -80,7 +80,7 @@ describe('catalog sync trust boundary', () => {
         speedRank: 1,
         sizeLabel: 'Small',
         limits: { rpm: 1, rpd: 1, tpm: 1, tpd: 1 },
-        monthlyTokenBudget: null,
+        monthlyTokenBudget: '0',
         contextWindow: 1024,
         enabled: true,
         supportsVision: false,
