@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPinnedLookup } from '../../lib/pinned-provider-fetch.js';
+import { assertProviderUrlAllowed, assessProviderUrl } from '../../lib/url-guard.js';
 
 describe('createPinnedLookup (custom-provider DNS pinning)', () => {
   it('returns only the addresses vetted for the request and never resolves again', () => {
@@ -7,6 +8,20 @@ describe('createPinnedLookup (custom-provider DNS pinning)', () => {
     const callback = vi.fn();
     lookup('api.example.com', { all: true }, callback);
     expect(callback).toHaveBeenCalledWith(null, [{ address: '93.184.216.34', family: 4 }]);
+  });
+
+  it('does not re-resolve when DNS changes from public to metadata after validation', async () => {
+    let lookups = 0;
+    const resolver = async () => {
+      lookups += 1;
+      return lookups === 1 ? ['93.184.216.34'] : ['169.254.169.254'];
+    };
+    const vetted = await assertProviderUrlAllowed('https://api.example.com/v1', { resolve: resolver });
+    const lookup = createPinnedLookup('api.example.com', vetted);
+    const callback = vi.fn();
+    lookup('api.example.com', { all: true }, callback);
+    expect(callback).toHaveBeenCalledWith(null, [{ address: '93.184.216.34', family: 4 }]);
+    expect(lookups).toBe(1);
   });
 
   it('supports IPv4 and IPv6 answers while respecting the requested family', () => {
