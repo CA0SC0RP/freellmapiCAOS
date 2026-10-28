@@ -80,7 +80,7 @@ function rebuildModels(db: Db, extraColumns: string, copiedColumns: string, uniq
   // Keep the historical schema unchanged for databases that predate the field.
   const modelColumns = db.prepare('PRAGMA table_info(models)').all() as { name: string }[];
   const hasTaskTags = modelColumns.some(column => column.name === 'task_tags_json');
-  const rebuiltColumns = hasTaskTags ? `${MODELS_COLUMNS},\n      task_tags_json TEXT NOT NULL DEFAULT '[]'` : MODELS_COLUMNS;
+  const rebuiltColumns = `${MODELS_COLUMNS}${extraColumns}${hasTaskTags ? ",\\n      task_tags_json TEXT NOT NULL DEFAULT '[]'" : ''}`;
   const rebuiltCopiedColumns = hasTaskTags ? `${copiedColumns}, task_tags_json` : copiedColumns;
   const children = childTablesOfModels(db);
   // AUTOINCREMENT's high-water mark. DROP TABLE takes the sqlite_sequence row
@@ -97,7 +97,7 @@ function rebuildModels(db: Db, extraColumns: string, copiedColumns: string, uniq
   }
 
   db.exec(`
-    CREATE TABLE models_endpoint_identity (${rebuiltColumns}${extraColumns},
+    CREATE TABLE models_endpoint_identity (${rebuiltColumns},
       ${unique}
     );
     INSERT INTO models_endpoint_identity (${rebuiltCopiedColumns})
