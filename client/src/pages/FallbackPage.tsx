@@ -74,11 +74,10 @@ const CTX_BUCKETS: { key: number; label?: string; tKey?: string }[] = [
   { key: 1_000_000, label: '1M+' },
 ]
 
-// Verified catalog tags only. Models without tags remain visible under All tasks.
+// Tags relevant to the text/chat registry. Media and specialized registries will get their own filters.
+// Models without tags remain visible under All tasks.
 const TASK_FILTERS = [
-  'chat', 'writing', 'coding', 'reasoning', 'image-input', 'image-generation',
-  'audio-input', 'audio-generation', 'transcription', 'video-input',
-  'video-generation', 'web-search', 'embeddings', 'decision',
+  'chat', 'writing', 'coding', 'reasoning', 'image-input',
 ] as const
 
 // Rows rendered up front; a sentinel below the table streams in the rest as
