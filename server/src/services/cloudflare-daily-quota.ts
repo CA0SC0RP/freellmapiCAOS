@@ -1,6 +1,6 @@
 import { getDb } from '../db/index.js';
 import { decrypt } from '../lib/crypto.js';
-import { setCooldown, type CooldownSource } from './ratelimit.js';
+import { getActiveCooldownsForKeys, setCooldown, type CooldownSource } from './ratelimit.js';
 
 // Cloudflare Workers AI meters its free 10K neurons/day per ACCOUNT: every
 // @cf/* model and every API token of one account draw on the same pool. The
@@ -59,10 +59,18 @@ export function benchCloudflareAccount(
   const models = db.prepare(
     "SELECT model_id FROM models WHERE platform = 'cloudflare' AND enabled = 1",
   ).all() as { model_id: string }[];
+  const activeByKey = getActiveCooldownsForKeys(keyIds);
+  const targetExpiry = Date.now() + durationMs;
 
   let benched = 0;
   for (const keyId of keyIds) {
     for (const { model_id } of models) {
+      // A shared-account quota signal must not shorten a longer cooldown
+      // already established for this model/key (for example a later
+      // provider-stated Retry-After). Preserve both its expiry and provenance.
+      const existing = activeByKey.get(keyId)
+        ?.find(c => c.platform === 'cloudflare' && c.modelId === model_id);
+      if (existing && existing.expiresAtMs >= targetExpiry) continue;
       setCooldown('cloudflare', model_id, keyId, durationMs, source);
       benched++;
     }
