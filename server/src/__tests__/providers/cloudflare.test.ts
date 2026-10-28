@@ -228,4 +228,70 @@ describe('CloudflareProvider', () => {
     expect(capturedBody.messages[1].content).toBe('');
     expect(capturedBody.messages[1].tool_calls).toHaveLength(1);
   });
+
+  it('preserves structured tool-call responses and sends required tool choice', async () => {
+    let capturedUrl = '';
+    let capturedBody: any = null;
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      capturedUrl = String(url);
+      capturedBody = JSON.parse(String((init as any).body));
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          id: 'cf-tool-test',
+          object: 'chat.completion',
+          created: 123,
+          model: '@cf/meta/llama-3.1-70b-instruct',
+          choices: [{
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [{
+                id: 'call_weather',
+                type: 'function',
+                function: { name: 'get_weather', arguments: '{"city":"Mexico City"}' },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+          usage: { prompt_tokens: 8, completion_tokens: 3, total_tokens: 11 },
+        }),
+      } as any;
+    });
+
+    const result = await provider.chatCompletion(
+      'abc123:token',
+      [{ role: 'user', content: 'What is the weather in Mexico City?' }],
+      '@cf/meta/llama-3.1-70b-instruct',
+      {
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'get_weather',
+            description: 'Get current weather',
+            parameters: {
+              type: 'object',
+              properties: { city: { type: 'string' } },
+              required: ['city'],
+            },
+          },
+        }],
+        tool_choice: 'required',
+      },
+    );
+
+    expect(capturedUrl).toBe('https://api.cloudflare.com/client/v4/accounts/abc123/ai/v1/chat/completions');
+    expect(capturedBody.tools).toHaveLength(1);
+    expect(capturedBody.tool_choice).toBe('required');
+    expect(result.choices[0].finish_reason).toBe('tool_calls');
+    expect(result.choices[0].message.content).toBeNull();
+    expect(result.choices[0].message.tool_calls).toEqual([{
+      id: 'call_weather',
+      type: 'function',
+      function: { name: 'get_weather', arguments: '{"city":"Mexico City"}' },
+    }]);
+    expect(result.usage).toEqual({ prompt_tokens: 8, completion_tokens: 3, total_tokens: 11 });
+  });
+
 });
