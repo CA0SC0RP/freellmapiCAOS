@@ -1,8 +1,33 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getDb, getSetting, initDb, setSetting } from '../../db/index.js';
-import { SETTING_LICENSE_KEY, syncCatalog } from '../../services/catalog-sync.js';
+import { catalogShapeProblems, SETTING_LICENSE_KEY, syncCatalog } from '../../services/catalog-sync.js';
 
 describe('catalog sync trust boundary', () => {
+  it('rejects unknown task tags instead of treating them as verified capabilities', () => {
+    const problems = catalogShapeProblems({
+      version: '2099.01.01',
+      generatedAt: new Date().toISOString(),
+      tier: 'live',
+      models: [{
+        platform: 'groq',
+        modelId: 'unknown-tag-model',
+        displayName: 'Unknown Tag Model',
+        intelligenceRank: 1,
+        speedRank: 1,
+        sizeLabel: 'Small',
+        limits: { rpm: 1, rpd: 1, tpm: 1, tpd: 1 },
+        monthlyTokenBudget: '0',
+        contextWindow: 1024,
+        enabled: true,
+        supportsVision: false,
+        supportsTools: false,
+        taskTags: ['magic-capability'],
+      }],
+      quirks: [],
+    });
+    expect(problems).toContain('models[0] taskTags contains an unknown or non-string tag');
+  });
+
   beforeAll(() => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
