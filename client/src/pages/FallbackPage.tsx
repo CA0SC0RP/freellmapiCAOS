@@ -74,6 +74,13 @@ const CTX_BUCKETS: { key: number; label?: string; tKey?: string }[] = [
   { key: 1_000_000, label: '1M+' },
 ]
 
+// Verified catalog tags only. Models without tags remain visible under All tasks.
+const TASK_FILTERS = [
+  'chat', 'writing', 'coding', 'reasoning', 'image-input', 'image-generation',
+  'audio-input', 'audio-generation', 'transcription', 'video-input',
+  'video-generation', 'web-search', 'embeddings', 'decision',
+] as const
+
 // Rows rendered up front; a sentinel below the table streams in the rest as
 // you scroll. Keeps first paint cheap when the catalog grows into the
 // hundreds without a virtualization dependency (which would fight dnd-kit).
@@ -111,6 +118,7 @@ export default function FallbackPage() {
   const [filterVision, setFilterVision] = useState(false)
   const [filterTools, setFilterTools] = useState(false)
   const [minContext, setMinContext] = useState(0)
+  const [taskFilter, setTaskFilter] = useState('')
 
   // The table edits the ACTIVE chain, so it is part of this query's identity
   // (#1021): keyed on 'fallback' alone, switching chains in the manager below
@@ -244,14 +252,15 @@ export default function FallbackPage() {
   // unfiltered manual chain (reordering a filtered subset would be ambiguous).
   const rankByKey = useMemo(() => new Map(orderedGroups.map((g, i) => [g.key, i + 1])), [orderedGroups])
   const query = search.trim().toLowerCase()
-  const filtersActive = query !== '' || filterVision || filterTools || minContext > 0
+  const filtersActive = query !== '' || filterVision || filterTools || minContext > 0 || taskFilter !== ''
   const visibleGroups = useMemo(() => orderedGroups.filter(g => {
     if (filterVision && !g.members.some(m => m.supportsVision)) return false
     if (filterTools && !g.members.some(m => m.supportsTools)) return false
     if (minContext > 0 && groupMaxContext(g.members) < minContext) return false
+    if (taskFilter && !g.members.some(m => m.taskTags?.includes(taskFilter))) return false
     if (query && !groupMatchesQuery(g, query)) return false
     return true
-  }), [orderedGroups, filterVision, filterTools, minContext, query])
+  }), [orderedGroups, filterVision, filterTools, minContext, taskFilter, query])
   const draggable = isManual && !filtersActive
 
   // Progressive rendering: grow the row budget whenever the sentinel below the
@@ -279,6 +288,7 @@ export default function FallbackPage() {
     setFilterVision(false)
     setFilterTools(false)
     setMinContext(0)
+    setTaskFilter('')
   }
 
   function handleGroupToggle(memberIds: number[], enabled: boolean) {
@@ -589,6 +599,18 @@ export default function FallbackPage() {
                 >
                   {t('models.tools')}
                 </button>
+                <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>{t('models.taskFilter')}</span>
+                  <select
+                    value={taskFilter}
+                    onChange={e => setTaskFilter(e.target.value)}
+                    aria-label={t('models.taskFilter')}
+                    className="h-8 rounded-lg border bg-card px-2 text-xs text-foreground outline-none focus:border-foreground/30"
+                  >
+                    <option value="">{t('models.allTasks')}</option>
+                    {TASK_FILTERS.map(tag => <option key={tag} value={tag}>{t(`models.taskTags.${tag}`)}</option>)}
+                  </select>
+                </label>
                 <div className="inline-flex items-center gap-1 rounded-xl border p-1" role="group" aria-label={t('models.ctxTitle')}>
                   {CTX_BUCKETS.map(b => (
                     <button
@@ -625,6 +647,7 @@ export default function FallbackPage() {
 
             <p className="text-xs text-muted-foreground">
               {t('models.enabledOfShown', { enabled: visibleEnabledCount, shown: visibleGroups.length })}
+              {taskFilter && <span className="ml-2">{t('models.unclassifiedTaskHint')}</span>}
             </p>
 
             {filtersActive && (
