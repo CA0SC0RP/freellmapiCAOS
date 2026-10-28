@@ -177,6 +177,8 @@ export function isLoopbackOrPrivateUrl(rawUrl: string | null | undefined): boole
 export interface UrlAssessment {
   allowed: boolean;
   reason?: string;
+  /** Exact DNS/IP set assessed for this request; absent for save-time offline allowances. */
+  addresses?: string[];
 }
 
 export interface AssessOptions {
@@ -245,6 +247,9 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
 
   const blockPrivate = opts.blockPrivate ?? blockPrivateEnabled();
   for (const address of addresses) {
+    if (net.isIP(address) === 0) {
+      return { allowed: false, reason: 'hostname resolved to a malformed IP address' };
+    }
     const cls = classifyIp(address);
     if (cls === 'metadata') {
       return { allowed: false, reason: `resolves to a cloud metadata address (${address})` };
@@ -259,7 +264,7 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
       };
     }
   }
-  return { allowed: true };
+  return { allowed: true, addresses: [...new Set(addresses)] };
 }
 
 /**
@@ -271,11 +276,17 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
 export async function assertProviderUrlAllowed(
   rawUrl: string,
   options: Omit<AssessOptions, 'failOnResolutionError'> = {},
-): Promise<void> {
+): Promise<string[]> {
   // Request-time enforcement must always fail closed; options only allow tests
-  // and internal callers to provide a deterministic resolver.
+  // and internal callers to provide a deterministic resolver. Return the exact
+  // vetted address set so the transport can pin its socket without resolving
+  // the hostname a second time.
   const verdict = await assessProviderUrl(rawUrl, { ...options, failOnResolutionError: true });
   if (!verdict.allowed) {
     throw new Error(`Custom provider URL blocked: ${verdict.reason}`);
   }
+  if (!verdict.addresses?.length) {
+    throw new Error('Custom provider URL blocked: no vetted destination addresses available');
+  }
+  return verdict.addresses;
 }
