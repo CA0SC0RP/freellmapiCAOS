@@ -93,6 +93,12 @@ describe('POST /api/auth/desktop-session (#1399)', () => {
     expect(res.status).toBe(403);
   });
 
+  it('does not treat malformed forwarded IPv4 addresses as loopback', async () => {
+    const res = await call(app(), 'POST', '/api/auth/desktop-session', { 'x-forwarded-for': '127.999.999.999' });
+    expect(res.status).toBe(403);
+    expect((await call(app(), 'GET', '/api/auth/status', { 'x-forwarded-for': '127.999.999.999' })).body.desktop).toBe(false);
+  });
+
   it('refuses a DNS-rebinding page (non-local Host header)', async () => {
     const res = await call(app(), 'POST', '/api/auth/desktop-session', { host: 'evil.example:31415' });
     expect(res.status).toBe(403);
