@@ -23,7 +23,20 @@ describe('catalog sync trust boundary', () => {
       version: '2099.01.01',
       generatedAt: new Date().toISOString(),
       tier: 'live',
-      models: [],
+      models: [{
+        platform: 'groq',
+        modelId: 'unsigned-catalog-model',
+        displayName: 'Unsigned Catalog Model',
+        intelligenceRank: 1,
+        speedRank: 1,
+        sizeLabel: 'Small',
+        limits: { rpm: 1, rpd: 1, tpm: 1, tpd: 1 },
+        monthlyTokenBudget: null,
+        contextWindow: 1024,
+        enabled: true,
+        supportsVision: false,
+        supportsTools: false,
+      }],
       quirks: [],
     };
     const fetchMock = vi.fn().mockResolvedValue(
