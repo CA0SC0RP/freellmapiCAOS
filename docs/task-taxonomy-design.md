@@ -58,3 +58,23 @@ Input and output capabilities must never be conflated (for example, image-input 
 - Local model edits, user-created models, tombstones, fallback chains and profiles survive sync.
 - Task filtering is additive, multi-tag models can appear in multiple filters, and manual/automatic routing remains unchanged.
 - Image input and image generation, audio input and speech generation, and transcription remain distinct.
+
+
+## Capability-boundary validation (staged)
+
+These checks are intentionally separate because the fields describe different facts:
+
+1. **Signed catalog → database:** `supportsTools` is persisted as a declared capability independently of `taskTags`. A `coding` tag must not imply tool calling, and `supportsTools: true` must not imply that a provider key or quota is available.
+2. **Database → API:** `/api/fallback` returns the boolean `supportsTools` and the verified task tags as separate fields. This is a serialization contract, not a runtime provider compatibility guarantee.
+3. **Provider adapter → request:** a later integration test must exercise a tool-call request against each adapter family that advertises tool support. A model/catalog flag alone is insufficient evidence that an adapter translates and returns tool calls correctly.
+4. **Runtime availability:** API key health, permissions, rate limits, and quota remain runtime state. They must not be encoded as task tags or inferred from `supportsTools`.
+5. **Modality registries:** task-filter UI for image/audio generation, transcription, video, search, embeddings, and decision models must read their existing dedicated registries. Do not merge those records into the chat fallback list merely to populate a selector.
+
+### Rollout gates
+
+- **Stage A — metadata/API boundary:** signed-catalog persistence and `/api/fallback` serialization tests pass; existing signature and legacy-catalog tests remain green.
+- **Stage B — adapter compatibility:** add targeted mocked request/response tests for tool-call translation per adapter family. Do not advertise support for an adapter family until its tests pass.
+- **Stage C — modality filters:** add filters to the corresponding screens using their own registries, retain “All” as the default, and keep unclassified/custom entries visible in the unfiltered view.
+- **Stage D — data quality:** audit catalog rows against explicit provider/model documentation or repeatable tests. Missing evidence stays unclassified; do not infer support from names.
+
+No stage may change fallback routing or trigger paid provider usage without explicit authorization.

@@ -64,6 +64,31 @@ describe('Fallback API', () => {
     expect(first).toHaveProperty('contextWindow');
   });
 
+  it('GET /api/fallback preserves tool capability separately from task tags', async () => {
+    const db = getDb();
+    // Select a model from the API's actual fallback chain; not every row in
+    // models is necessarily included in the active profile's response.
+    const { status: initialStatus, body: initialBody } = await request(app, 'GET', '/api/fallback');
+    expect(initialStatus).toBe(200);
+    expect(initialBody.length).toBeGreaterThan(0);
+    const modelDbId = initialBody[0].modelDbId as number;
+    const row = db.prepare(
+      'SELECT supports_tools, task_tags_json FROM models WHERE id = ?',
+    ).get(modelDbId) as { supports_tools: number; task_tags_json: string | null };
+    const original = { supportsTools: row.supports_tools, taskTags: row.task_tags_json };
+    try {
+      db.prepare('UPDATE models SET supports_tools = 1, task_tags_json = ? WHERE id = ?')
+        .run(JSON.stringify(['coding']), modelDbId);
+      const { status, body } = await request(app, 'GET', '/api/fallback');
+      expect(status).toBe(200);
+      const entry = body.find((item: { modelDbId: number }) => item.modelDbId === modelDbId);
+      expect(entry).toMatchObject({ supportsTools: true, taskTags: ['coding'] });
+    } finally {
+      db.prepare('UPDATE models SET supports_tools = ?, task_tags_json = ? WHERE id = ?')
+        .run(original.supportsTools, original.taskTags, modelDbId);
+    }
+  });
+
   it('GET /api/fallback/token-usage reports per-model chat usage for configured platforms', async () => {
     const db = getDb();
     const target = db.prepare(`

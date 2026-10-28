@@ -109,7 +109,7 @@ describe('catalog sync trust boundary', () => {
         contextWindow: 1024,
         enabled: true,
         supportsVision: false,
-        supportsTools: false,
+        supportsTools: true,
         taskTags: ['coding', 'reasoning'],
       }],
       quirks: [],
@@ -129,9 +129,12 @@ describe('catalog sync trust boundary', () => {
     expect(
       getDb().prepare("SELECT COUNT(*) AS n FROM models WHERE model_id = 'trusted-signature-model'").get(),
     ).toEqual({ n: 1 });
+    // Signed catalog capabilities must survive sync independently: a task tag
+    // does not imply tool calling, and a declared tool capability is not a quota
+    // or provider-runtime guarantee.
     expect(
-      getDb().prepare("SELECT task_tags_json FROM models WHERE model_id = 'trusted-signature-model'").get(),
-    ).toEqual({ task_tags_json: '["coding","reasoning"]' });
+      getDb().prepare("SELECT supports_tools, task_tags_json FROM models WHERE model_id = 'trusted-signature-model'").get(),
+    ).toEqual({ supports_tools: 1, task_tags_json: '["coding","reasoning"]' });
   });
 
   it('preserves existing task tags when a legacy signed catalog omits taskTags', async () => {
