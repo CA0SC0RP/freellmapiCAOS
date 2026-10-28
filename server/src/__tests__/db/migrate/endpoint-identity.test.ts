@@ -195,6 +195,10 @@ describe('custom model endpoint identity migration', () => {
     const db = await seededLegacyDb();
     try {
       await runMigrations(db, 'up');
+      // Seed task metadata before exercising this older migration's rebuild.
+      // The down/up cycle must preserve columns introduced by later migrations.
+      db.prepare('UPDATE models SET task_tags_json = ? WHERE model_id = ?')
+        .run('["coding","reasoning"]', 'deepseek-v3.1');
       const afterFirstUp = db.prepare('SELECT * FROM models ORDER BY id').all();
       const schemaAfterFirstUp = db.prepare(
         "SELECT sql FROM sqlite_master WHERE name = 'models'",
@@ -206,8 +210,9 @@ describe('custom model endpoint identity migration', () => {
 
       endpointIdentityUp(db);
       expect(db.prepare('SELECT * FROM models ORDER BY id').all()).toEqual(afterFirstUp);
-      expect((db.prepare("SELECT sql FROM sqlite_master WHERE name = 'models'").get() as { sql: string }).sql)
-        .toBe(schemaAfterFirstUp.sql);
+      expect(((db.prepare("SELECT sql FROM sqlite_master WHERE name = 'models'").get() as { sql: string }).sql)
+        .replace(/\s+/g, ' ').trim())
+        .toBe(schemaAfterFirstUp.sql.replace(/\s+/g, ' ').trim());
       expect(db.pragma('foreign_key_check')).toEqual([]);
 
       // With a real duplicate on the books, down() has no honest answer.

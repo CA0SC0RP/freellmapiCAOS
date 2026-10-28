@@ -22,6 +22,13 @@ import { ensureAllModelsInProfiles } from './profile-models.js';
 // (see services/media.ts), never into the chat `models` table.
 const MEDIA_MODALITIES = new Set(['image', 'audio']);
 
+/** Allowed tags are deliberately task-specific: input and generation are distinct. */
+const MODEL_TASK_TAGS = new Set([
+  'chat', 'writing', 'coding', 'reasoning', 'image-input', 'image-generation',
+  'audio-input', 'audio-generation', 'transcription', 'video-input',
+  'video-generation', 'web-search', 'embeddings', 'decision',
+]);
+
 /**
  * catalog-sync — keeps the local model catalog in step with the published one.
  *
@@ -143,6 +150,8 @@ interface CatalogModel {
   enabled: boolean;
   supportsVision: boolean;
   supportsTools: boolean;
+  /** Optional verified task categories. Absent means unclassified; never infer unsupported. */
+  taskTags?: string[];
   /** 'text' (default/absent) routes to the chat `models` table; 'image'/'audio'
    *  route to the separate `media_models` table. */
   modality?: string;
@@ -367,6 +376,8 @@ export function catalogShapeProblems(value: unknown): string[] {
       if (!str(m?.displayName)) return 'displayName is not a string';
       if (!bool(m?.enabled)) return 'enabled is not a boolean';
       if (!nulStr(m?.requestStyle)) return 'requestStyle is not a string';
+      if (m?.taskTags !== undefined && m?.modality !== undefined && m.modality !== 'text') return 'taskTags are only supported for text/chat models';
+      if (m?.taskTags !== undefined && !(Array.isArray(m.taskTags) && m.taskTags.every((tag: unknown) => typeof tag === 'string' && MODEL_TASK_TAGS.has(tag)))) return 'taskTags contains an unknown or non-string tag';
       if (!m?.limits || typeof m.limits !== 'object') return 'limits is missing';
       return null;
     });
@@ -514,6 +525,7 @@ function applyCatalogInner(db: Db, catalog: Catalog): NonNullable<SyncResult['co
       size_label = @sizeLabel, rpm_limit = @rpm, rpd_limit = @rpd, tpm_limit = @tpm, tpd_limit = @tpd,
       monthly_token_budget = @monthlyTokenBudget, context_window = @contextWindow,
       supports_vision = @supportsVision, supports_tools = @supportsTools,
+      task_tags_json = CASE WHEN @taskTagsPresent = 1 THEN @taskTags ELSE task_tags_json END,
       enabled = @enabled
     WHERE id = @id
   `);
@@ -521,10 +533,11 @@ function applyCatalogInner(db: Db, catalog: Catalog): NonNullable<SyncResult['co
   const insertModel = db.prepare(`
     INSERT INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, size_label,
                         rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window,
-                        enabled, supports_vision, supports_tools, source)
+                        enabled, supports_vision, supports_tools, task_tags_json, source)
     VALUES (@platform, @modelId, @displayName, @intelligenceRank, @speedRank, @sizeLabel,
             @rpm, @rpd, @tpm, @tpd, @monthlyTokenBudget, @contextWindow,
-            @enabled, @supportsVision, @supportsTools, 'catalog')
+            @enabled, @supportsVision, @supportsTools,
+            CASE WHEN @taskTagsPresent = 1 THEN @taskTags ELSE '[]' END, 'catalog')
   `);
 
   // Generative-media models go to their own table (never the chat router's pool).
@@ -658,6 +671,8 @@ function applyCatalogInner(db: Db, catalog: Catalog): NonNullable<SyncResult['co
         contextWindow: m.contextWindow,
         supportsVision: m.supportsVision ? 1 : 0,
         supportsTools: m.supportsTools ? 1 : 0,
+        taskTagsPresent: m.taskTags !== undefined ? 1 : 0,
+        taskTags: JSON.stringify(m.taskTags ?? []),
       };
       if (row) {
         // Catalog disable wins (dead upstream); local disable also wins.

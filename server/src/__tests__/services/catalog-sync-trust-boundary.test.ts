@@ -1,8 +1,33 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getDb, getSetting, initDb, setSetting } from '../../db/index.js';
-import { SETTING_LICENSE_KEY, syncCatalog } from '../../services/catalog-sync.js';
+import { catalogShapeProblems, SETTING_LICENSE_KEY, syncCatalog } from '../../services/catalog-sync.js';
 
 describe('catalog sync trust boundary', () => {
+  it('rejects unknown task tags instead of treating them as verified capabilities', () => {
+    const problems = catalogShapeProblems({
+      version: '2099.01.01',
+      generatedAt: new Date().toISOString(),
+      tier: 'live',
+      models: [{
+        platform: 'groq',
+        modelId: 'unknown-tag-model',
+        displayName: 'Unknown Tag Model',
+        intelligenceRank: 1,
+        speedRank: 1,
+        sizeLabel: 'Small',
+        limits: { rpm: 1, rpd: 1, tpm: 1, tpd: 1 },
+        monthlyTokenBudget: '0',
+        contextWindow: 1024,
+        enabled: true,
+        supportsVision: false,
+        supportsTools: false,
+        taskTags: ['magic-capability'],
+      }],
+      quirks: [],
+    });
+    expect(problems).toContain('models[0] taskTags contains an unknown or non-string tag');
+  });
+
   beforeAll(() => {
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
@@ -85,6 +110,7 @@ describe('catalog sync trust boundary', () => {
         enabled: true,
         supportsVision: false,
         supportsTools: false,
+        taskTags: ['coding', 'reasoning'],
       }],
       quirks: [],
     };
@@ -103,6 +129,64 @@ describe('catalog sync trust boundary', () => {
     expect(
       getDb().prepare("SELECT COUNT(*) AS n FROM models WHERE model_id = 'trusted-signature-model'").get(),
     ).toEqual({ n: 1 });
+    expect(
+      getDb().prepare("SELECT task_tags_json FROM models WHERE model_id = 'trusted-signature-model'").get(),
+    ).toEqual({ task_tags_json: '["coding","reasoning"]' });
+  });
+
+  it('preserves existing task tags when a legacy signed catalog omits taskTags', async () => {
+    process.env.CATALOG_BASE_URL = 'https://catalog.test';
+    setSetting('catalog_applied_version', '2026.10.01');
+    setSetting('catalog_applied_tier', 'monthly');
+
+    const crypto = await import('node:crypto');
+    const trusted = crypto.generateKeyPairSync('ed25519');
+    process.env.CATALOG_PUBKEY = trusted.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const model = {
+      platform: 'groq',
+      modelId: 'legacy-catalog-compatible-model',
+      displayName: 'Legacy Catalog Compatible Model',
+      intelligenceRank: 1,
+      speedRank: 1,
+      sizeLabel: 'Small',
+      limits: { rpm: 1, rpd: 1, tpm: 1, tpd: 1 },
+      monthlyTokenBudget: '0',
+      contextWindow: 1024,
+      enabled: true,
+      supportsVision: false,
+      supportsTools: false,
+    };
+    const signedResponse = (payload: object) => {
+      const bytes = Buffer.from(JSON.stringify(payload));
+      const signature = crypto.sign(null, bytes, trusted.privateKey).toString('base64');
+      return new Response(bytes, {
+        status: 200,
+        headers: { 'content-type': 'application/json', 'x-catalog-signature': signature },
+      });
+    };
+    const first = {
+      version: '2099.10.01',
+      generatedAt: new Date().toISOString(),
+      tier: 'live',
+      models: [{ ...model, taskTags: ['coding', 'reasoning'] }],
+      quirks: [],
+    };
+    const legacy = {
+      version: '2099.10.02',
+      generatedAt: new Date().toISOString(),
+      tier: 'live',
+      models: [model],
+      quirks: [],
+    };
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(signedResponse(first))
+      .mockResolvedValueOnce(signedResponse(legacy)));
+
+    expect(await syncCatalog(true)).toMatchObject({ ok: true, action: 'applied', version: '2099.10.01' });
+    expect(await syncCatalog(true)).toMatchObject({ ok: true, action: 'applied', version: '2099.10.02' });
+    expect(
+      getDb().prepare("SELECT task_tags_json FROM models WHERE model_id = 'legacy-catalog-compatible-model'").get(),
+    ).toEqual({ task_tags_json: '["coding","reasoning"]' });
   });
 
   it('rejects a catalog signed by an untrusted key and preserves the applied catalog', async () => {

@@ -158,11 +158,21 @@ fallbackRouter.put('/routing', (req: Request, res: Response) => {
 // The catalog columns every fallback row carries, whichever table supplies the
 // priority/enabled pair. Kept in one place so the profile and the no-profile
 // query can never drift apart.
+function parseTaskTags(raw: unknown): string[] {
+  if (typeof raw !== 'string') return [];
+  try {
+    const value: unknown = JSON.parse(raw);
+    return Array.isArray(value) && value.every(tag => typeof tag === 'string') ? value : [];
+  } catch {
+    return [];
+  }
+}
+
 const MODEL_COLUMNS = `
            m.platform, m.model_id, m.display_name, m.intelligence_rank,
            m.speed_rank, m.size_label, m.rpm_limit, m.rpd_limit,
            m.tpm_limit, m.tpd_limit, m.context_window,
-           m.monthly_token_budget, m.supports_vision, m.supports_tools,
+           m.monthly_token_budget, m.supports_vision, m.supports_tools, m.task_tags_json,
            m.key_id, m.endpoint_scope, m.source AS model_source, ak.label AS key_label,
            mo.overrides_json IS NOT NULL AS has_overrides,
            mo.overrides_json,
@@ -309,6 +319,7 @@ fallbackRouter.get('/', (req: Request, res: Response) => {
       monthlyTokenBudgetTokens: parseBudget(r.monthly_token_budget) * Math.max(1, keyCountMap.get(r.platform) ?? 1),
       supportsVision: r.supports_vision === 1,
       supportsTools: r.supports_tools === 1,
+      taskTags: parseTaskTags(r.task_tags_json),
       // 'discovered' (#1348): fetched from a built-in provider's /models because
       // the catalog carries none for it. Routes like a catalog row.
       source: r.platform === 'custom' || r.key_id != null
