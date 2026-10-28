@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { isIP } from 'node:net';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import {
@@ -76,6 +77,29 @@ function lockoutRetryAfterSec(email: string, now = Date.now()): number {
   if (!a || a.lockedUntil <= now) return 0;
   return Math.max(1, Math.ceil((a.lockedUntil - now) / 1000));
 }
+function hasCapacityFor(email: string, now = Date.now()): boolean {
+  const key = throttleKey(email);
+  if (attempts.has(key)) return true;
+
+  // Partial-attempt buckets are immediately reusable; expired lockouts are
+  // also safe to remove. Never evict a live lockout just to admit a new key.
+  for (const [tracked, state] of attempts) {
+    if (state.lockedUntil <= now) attempts.delete(tracked);
+  }
+  if (attempts.size < MAX_TRACKED_EMAILS) return true;
+
+  return false;
+}
+
+function capacityRetryAfterSec(now = Date.now()): number {
+  let earliestUnlock = Number.POSITIVE_INFINITY;
+  for (const state of attempts.values()) {
+    if (state.lockedUntil > now) earliestUnlock = Math.min(earliestUnlock, state.lockedUntil);
+  }
+  if (!Number.isFinite(earliestUnlock)) return 1;
+  return Math.max(1, Math.ceil((earliestUnlock - now) / 1000));
+}
+
 function recordFailure(email: string): void {
   const key = throttleKey(email);
   const a = attempts.get(key) ?? { count: 0, lockedUntil: 0 };
@@ -106,7 +130,10 @@ function isLoopbackAddress(value: string | undefined): boolean {
   // Node reports IPv4 loopback over a dual-stack socket as "::ffff:127.0.0.1".
   if (addr.startsWith('::ffff:')) addr = addr.slice(7);
   if (addr === '::1') return true;
-  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(addr);
+  // Validate the full IPv4 syntax before trusting a loopback prefix. A loose
+  // regex also accepted impossible addresses such as 127.999.999.999 from an
+  // attacker-controlled forwarded header.
+  return isIP(addr) === 4 && Number(addr.split('.')[0]) === 127;
 }
 
 // Is the caller connecting from the local machine? The socket peer address is
@@ -247,6 +274,15 @@ authRouter.post('/login', (req: Request, res: Response) => {
     return;
   }
   const { email, password } = parsed.data;
+
+  // Under a high-cardinality login flood, refuse new identifiers rather than
+  // growing the in-memory map or evicting active account lockouts.
+  if (!attempts.has(throttleKey(email)) && !hasCapacityFor(email)) {
+    const retryAfter = capacityRetryAfterSec();
+    res.setHeader('Retry-After', String(retryAfter));
+    res.status(429).json({ error: { message: 'Login throttling capacity reached. Retry later.', type: 'rate_limit_error' } });
+    return;
+  }
 
   if (isLockedOut(email)) {
     // RFC 6585: a 429 must say when the client may return. The whole gateway
