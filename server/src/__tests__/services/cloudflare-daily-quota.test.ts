@@ -4,7 +4,7 @@ import { createApp } from '../../app.js';
 import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
 import { benchCloudflareAccount, cloudflareAccountId, isCloudflareNeuronsExhausted } from '../../services/cloudflare-daily-quota.js';
-import { clearCooldownsForKey, getActiveCooldownsForKeys, isOnCooldown, clearAllCooldowns } from '../../services/ratelimit.js';
+import { clearCooldownsForKey, getActiveCooldownsForKeys, isOnCooldown, clearAllCooldowns, setCooldown } from '../../services/ratelimit.js';
 
 // Cloudflare Workers AI's free 10K neurons/day is shared by every model and
 // every token of one ACCOUNT, so a daily neurons 429 benches the whole account
@@ -88,6 +88,28 @@ describe('Cloudflare shared daily neurons allowance', () => {
 
     expect(clearCooldownsForKey(a2)).toBe(active.length);
     expect(getActiveCooldownsForKeys([a2]).get(a2) ?? []).toEqual([]);
+  });
+
+  it('does not shorten a longer existing cooldown or overwrite its provenance', () => {
+    const a1 = insertKey('account-a:token-one');
+    const a2 = insertKey('account-a:token-two');
+    const models = cloudflareModels();
+    const model = models[0];
+    const longer = 3 * HOUR;
+    setCooldown('cloudflare', model, a2, longer, 'authoritative');
+    const before = getActiveCooldownsForKeys([a2]).get(a2)!.find(c => c.modelId === model)!;
+
+    benchCloudflareAccount('account-a:token-one', DAILY, HOUR, 'heuristic');
+
+    const after = getActiveCooldownsForKeys([a2]).get(a2)!.find(c => c.modelId === model)!;
+    expect(after.expiresAtMs).toBe(before.expiresAtMs);
+    const row = getDb().prepare(
+      'SELECT source FROM rate_limit_cooldowns WHERE platform = ? AND model_id = ? AND key_id = ?',
+    ).get('cloudflare', model, a2) as { source: string };
+    expect(row.source).toBe('authoritative');
+    // Other account-A routes are still benched, including the failing key.
+    expect(isOnCooldown('cloudflare', model, a1)).toBe(true);
+    expect(models.every(m => isOnCooldown('cloudflare', m, a2))).toBe(true);
   });
 });
 
