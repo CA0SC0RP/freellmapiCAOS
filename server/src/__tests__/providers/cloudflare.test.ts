@@ -120,7 +120,7 @@ describe('CloudflareProvider', () => {
     ).rejects.toThrow(/account_id:api_token/);
   });
 
-  it.each([':token', 'account:', ':', '   :token', 'account:   '])(
+  it.each([':token', 'account:', ':', '   :token', 'account:   ', ' account:token', 'account :token', 'account:token ', 'account: token'])(
     'rejects malformed key with an empty account or token (%s)', async (key) => {
       const fetchSpy = vi.spyOn(global, 'fetch');
       await expect(
