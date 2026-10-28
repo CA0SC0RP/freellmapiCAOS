@@ -118,6 +118,66 @@ describe('CohereProvider', () => {
     expect(capturedBody.tools).toBeUndefined();
   });
 
+  it('preserves structured tool calls from the OpenAI-compatible response', async () => {
+    let capturedBody: any = null;
+    vi.spyOn(global, 'fetch').mockImplementationOnce(async (_url, init) => {
+      capturedBody = JSON.parse((init as any).body);
+      return {
+        ok: true,
+        json: () => Promise.resolve({
+          id: 'cohere-tool-123',
+          object: 'chat.completion',
+          created: 123,
+          model: 'command-a-03-2025',
+          choices: [{
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [{
+                id: 'call_weather',
+                type: 'function',
+                function: { name: 'get_weather', arguments: '{"city":"Mexico City"}' },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+          usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 },
+        }),
+      } as any;
+    });
+
+    const result = await provider.chatCompletion(
+      'mock-key',
+      [{ role: 'user', content: 'What is the weather in Mexico City?' }],
+      'command-a-03-2025',
+      {
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'get_weather',
+            description: 'Get current weather',
+            parameters: {
+              type: 'object',
+              properties: { city: { type: 'string' } },
+              required: ['city'],
+            },
+          },
+        }],
+        tool_choice: 'required',
+      },
+    );
+
+    expect(capturedBody.tools).toHaveLength(1);
+    expect(capturedBody.tool_choice).toBe('required');
+    expect(result.choices[0].finish_reason).toBe('tool_calls');
+    expect(result.choices[0].message.tool_calls).toEqual([{
+      id: 'call_weather',
+      type: 'function',
+      function: { name: 'get_weather', arguments: '{"city":"Mexico City"}' },
+    }]);
+  });
+
   it('should validate key', async () => {
     vi.spyOn(global, 'fetch').mockResolvedValueOnce({ ok: true } as any);
     expect(await provider.validateKey('valid')).toBe(true);
