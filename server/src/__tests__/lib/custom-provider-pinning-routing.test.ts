@@ -49,7 +49,7 @@ describe('custom-provider pinned transport routing', () => {
     ['HTTP forward proxy', 'http://127.0.0.1:8080', 'forward'],
     ['SOCKS proxy', 'socks5h://127.0.0.1:1080', 'forward'],
     ['Fetch Relay', 'https://relay.example.test', 'fetch-relay'],
-  ])('fails closed before dispatching through %s', async (_label, proxyUrl, mode) => {
+  ] as const)('fails closed before dispatching through %s', async (_label, proxyUrl, mode) => {
     applyProxyUrl(proxyUrl);
     applyProxyMode(mode);
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
