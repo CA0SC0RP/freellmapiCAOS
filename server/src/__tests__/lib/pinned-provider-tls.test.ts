@@ -6,7 +6,9 @@ import { pinnedProviderFetch } from '../../lib/pinned-provider-fetch.js';
 
 const certPath = process.env.PINNED_PROVIDER_TEST_CERT;
 const keyPath = process.env.PINNED_PROVIDER_TEST_KEY;
-const tlsFixtureAvailable = Boolean(certPath && keyPath);
+const untrustedCertPath = process.env.PINNED_PROVIDER_UNTRUSTED_TEST_CERT;
+const untrustedKeyPath = process.env.PINNED_PROVIDER_UNTRUSTED_TEST_KEY;
+const tlsFixtureAvailable = Boolean(certPath && keyPath && untrustedCertPath && untrustedKeyPath);
 
 describe.skipIf(!tlsFixtureAvailable)('pinned custom-provider HTTPS/TLS', () => {
   const servers: Server[] = [];
@@ -18,10 +20,10 @@ describe.skipIf(!tlsFixtureAvailable)('pinned custom-provider HTTPS/TLS', () => 
     }));
   });
 
-  async function startTlsServer(): Promise<{ server: Server; port: number; sniNames: string[] }> {
+  async function startTlsServer(untrustedCertificate = false): Promise<{ server: Server; port: number; sniNames: string[] }> {
     const sniNames: string[] = [];
-    const cert = readFileSync(certPath!, 'utf8');
-    const key = readFileSync(keyPath!, 'utf8');
+    const cert = readFileSync(untrustedCertificate ? untrustedCertPath! : certPath!, 'utf8');
+    const key = readFileSync(untrustedCertificate ? untrustedKeyPath! : keyPath!, 'utf8');
     const context = createSecureContext({ cert, key });
     const server = createServer({
       cert,
@@ -56,6 +58,19 @@ describe.skipIf(!tlsFixtureAvailable)('pinned custom-provider HTTPS/TLS', () => 
       host: `${hostname}:${port}`,
       url: '/tls-check',
     });
+    expect(sniNames).toContain(hostname);
+  });
+
+  it('rejects a certificate signed by an untrusted test identity', async () => {
+    const { port, sniNames } = await startTlsServer(true);
+    const hostname = 'provider.test';
+
+    await expect(pinnedProviderFetch(
+      `https://${hostname}:${port}/untrusted-certificate`,
+      { method: 'GET' },
+      ['127.0.0.1'],
+    )).rejects.toThrow();
+
     expect(sniNames).toContain(hostname);
   });
 
