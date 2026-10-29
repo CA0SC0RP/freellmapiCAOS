@@ -670,25 +670,12 @@ async function callSpeechProvider(
       // follow redirects or download arbitrary URLs supplied by an upstream.
       const output = await mediaFetch(url, 'freeai', 'audio', { method: 'GET', redirect: 'error' });
       const maxBytes = 20 * 1024 * 1024;
-      if (Number(output.headers.get('content-length')) > maxBytes || !output.body) {
-        await output.body?.cancel();
-        throw new MediaError('Free.ai speech output is missing or too large', 502);
+      if (!output.body) {
+        throw new MediaError('Free.ai speech output is missing', 502);
       }
-      const reader = output.body.getReader(), chunks: Buffer[] = [];
-      let size = 0;
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          size += value.length;
-          if (size > maxBytes) {
-            await reader.cancel();
-            throw new MediaError('Free.ai speech output is too large', 502);
-          }
-          chunks.push(Buffer.from(value));
-        }
-      } finally { reader.releaseLock(); }
-      const audio = Buffer.concat(chunks);
+      // Use the shared bounded reader so a failed stream is cancelled and the
+      // response is not retained twice as per-chunk Buffers plus Buffer.concat.
+      const audio = bufferView(await readProviderResponseBytes(output, maxBytes));
       if (audio.length <= 44 || audio.toString('ascii', 0, 4) !== 'RIFF' || audio.toString('ascii', 8, 12) !== 'WAVE') {
         throw new MediaError('Free.ai returned no recognized WAV audio', 502);
       }
