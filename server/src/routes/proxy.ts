@@ -1208,7 +1208,17 @@ proxyRouter.post('/audio/speech', async (req: Request, res: Response) => {
 // unsupported_format rather than synthesized.
 const transcriptionUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_TRANSCRIPTION_BYTES, files: 1 },
+  // Multipart field count/size must be bounded too: `fields` and `parts` default
+  // to Infinity in Multer, and memoryStorage does not protect against oversized
+  // text fields accompanying an otherwise valid audio upload.
+  limits: {
+    fileSize: MAX_TRANSCRIPTION_BYTES,
+    files: 1,
+    fields: 16,
+    fieldSize: 64 * 1024,
+    fieldNameSize: 100,
+    parts: 17,
+  },
 });
 
 const TRANSCRIPTION_FORMATS = new Set(['json', 'text', 'verbose_json', 'srt', 'vtt']);
