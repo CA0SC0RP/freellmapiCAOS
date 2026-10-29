@@ -76,7 +76,7 @@ describe('ModelScope validateKey (#581)', () => {
 
   it('returns true when the 1-token chat probe authenticates (200)', async () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
-      if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
+      if (String(url).endsWith('/models')) return rosterResponse() as unknown as Response;
       return new Response(JSON.stringify({
           id: 'chatcmpl-1', object: 'chat.completion', created: 1,
           model: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
@@ -93,7 +93,7 @@ describe('ModelScope validateKey (#581)', () => {
     // ModelScope also 429s for retired models ("insufficient balance (1008)").
     // Neither case is an auth failure, so the key must not be disabled.
     vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
-      if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
+      if (String(url).endsWith('/models')) return rosterResponse() as unknown as Response;
       return new Response(JSON.stringify({ error: { message: 'Request limit exceeded' } }), { status: 429, headers: { 'Content-Type': 'application/json' } }) as unknown as Response;
     });
 
@@ -121,7 +121,7 @@ describe('ModelScope validateKey (#581)', () => {
 
   it('caches a successful validation per key and skips the network on repeat checks', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
-      if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
+      if (String(url).endsWith('/models')) return rosterResponse() as unknown as Response;
       return new Response(JSON.stringify({
           id: 'chatcmpl-1', object: 'chat.completion', created: 1,
           model: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
@@ -155,8 +155,8 @@ describe('ModelScope validateKey (#581)', () => {
 
   it('does not cache an invalid validation (a 401 re-probes on the next check)', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
-      if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
-      return AUTH_FAILED_401 as unknown as Response;
+      if (String(url).endsWith('/models')) return rosterResponse() as unknown as Response;
+      return authFailedResponse() as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
