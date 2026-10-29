@@ -108,7 +108,7 @@ premiumRouter.post('/portal', async (_req: Request, res: Response) => {
       body: JSON.stringify({ key }),
       signal: AbortSignal.timeout(15000),
     });
-    const body = (await r.json()) as { url?: string; error?: string };
+    const body = (await readProviderResponseJson(r)) as { url?: string; error?: string };
     if (!r.ok || !body.url) {
       res.status(502).json({ error: body.error ?? 'Could not open the billing portal.' });
       return;
