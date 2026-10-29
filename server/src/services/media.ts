@@ -372,7 +372,7 @@ async function callImageProvider(
 ): Promise<Array<{ b64_json?: string; url?: string }>> {
   const key = credential.key;
   const fetchForClient = (url: string, platform: string, modality: MediaModality, init: RequestInit) =>
-    fetchForClient(url, platform, modality, init, FETCH_TIMEOUT_MS, p.signal);
+    mediaFetch(url, platform, modality, init, FETCH_TIMEOUT_MS, p.signal);
   const [w, h] = parseSize(p.size);
   switch (row.platform) {
     case 'plugsky': {
@@ -663,7 +663,7 @@ async function callSpeechProvider(
 ): Promise<{ audio: Buffer; contentType: string }> {
   const key = credential.key;
   const fetchForClient = (url: string, platform: string, modality: MediaModality, init: RequestInit) =>
-    fetchForClient(url, platform, modality, init, FETCH_TIMEOUT_MS, p.signal);
+    mediaFetch(url, platform, modality, init, FETCH_TIMEOUT_MS, p.signal);
   switch (row.platform) {
     case 'freeai': {
       if (!key) throw new MediaError('Free.ai API key required', 401);
