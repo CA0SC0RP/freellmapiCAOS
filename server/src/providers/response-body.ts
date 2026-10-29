@@ -19,6 +19,11 @@ type ResponseBodyLike = {
   json?: () => Promise<unknown>;
 };
 
+/** Accept Uint8Array views from other JavaScript realms without accepting arbitrary objects. */
+function isUint8ArrayView(value: unknown): value is Uint8Array {
+  return ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === '[object Uint8Array]';
+}
+
 /** Read a response body while enforcing a hard byte limit independent of Content-Length. */
 export async function readProviderResponseText(
   response: Response | ResponseBodyLike,
@@ -50,16 +55,20 @@ export async function readProviderResponseText(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (!(value instanceof Uint8Array)) {
+      if (!isUint8ArrayView(value)) {
         throw new Error('Provider response stream returned an invalid chunk');
       }
       total += value.byteLength;
       if (total > maxBytes) {
-        try { await reader.cancel(); } catch { /* already closed */ }
         throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
       }
       chunks.push(value);
     }
+  } catch (error) {
+    // Cancel on every failed read/validation path so upstream work does not
+    // continue after we have already rejected the response.
+    try { await reader.cancel(); } catch { /* already closed or cancelled */ }
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -89,6 +98,9 @@ export function assertProviderStreamChunkWithinLimit(
   chunk: Uint8Array,
   maxBytes = MAX_PROVIDER_STREAM_FRAME_BYTES,
 ): void {
+  if (!isUint8ArrayView(chunk)) {
+    throw new Error('Provider stream returned an invalid chunk');
+  }
   if (chunk.byteLength > maxBytes) {
     throw new Error(`Provider stream chunk exceeded the ${maxBytes}-byte limit`);
   }
