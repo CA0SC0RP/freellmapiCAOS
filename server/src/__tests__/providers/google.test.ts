@@ -29,10 +29,7 @@ describe('GoogleProvider', () => {
       },
     };
 
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockResponse),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(mockResponse), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
     const result = await provider.chatCompletion(
       'test-key',
@@ -49,13 +46,10 @@ describe('GoogleProvider', () => {
   });
 
   it('converts an image_url data URL into a Gemini inlineData part (#118)', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         candidates: [{ content: { parts: [{ text: 'a cat' }] }, finishReason: 'STOP' }],
         usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-      }),
-    } as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
     await provider.chatCompletion('test-key', [
       { role: 'user', content: [
@@ -71,12 +65,7 @@ describe('GoogleProvider', () => {
   });
 
   it('should throw on API error', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: false,
-      status: 429,
-      statusText: 'Too Many Requests',
-      json: () => Promise.resolve({ error: { message: 'Rate limit exceeded' } }),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Rate limit exceeded' } }), { status: 429, statusText: 'Too Many Requests', headers: { 'Content-Type': 'application/json' } }));
 
     await expect(
       provider.chatCompletion('test-key', [{ role: 'user', content: 'Hi' }], 'gemini-2.5-pro')
