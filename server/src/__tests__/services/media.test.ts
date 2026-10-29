@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { initDb, getDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
-import { runImageGeneration, runVideoGeneration, runSpeech } from '../../services/media.js';
+import { runImageGeneration, runVideoGeneration, runSpeech, acquireTranscriptionUploadSlot } from '../../services/media.js';
 
 const realFetch = globalThis.fetch;
 
@@ -49,6 +49,23 @@ describe('media service', () => {
   afterEach(() => {
     globalThis.fetch = realFetch;
     vi.restoreAllMocks();
+  });
+
+  it('bounds transcription upload buffers before parsing begins', () => {
+    const previousLimit = process.env.MEDIA_MAX_CONCURRENT_TRANSCRIPTION_UPLOADS;
+    process.env.MEDIA_MAX_CONCURRENT_TRANSCRIPTION_UPLOADS = '1';
+    try {
+      const releaseFirst = acquireTranscriptionUploadSlot();
+      expect(releaseFirst).toBeTypeOf('function');
+      expect(acquireTranscriptionUploadSlot()).toBeNull();
+      releaseFirst?.();
+      const releaseSecond = acquireTranscriptionUploadSlot();
+      expect(releaseSecond).toBeTypeOf('function');
+      releaseSecond?.();
+    } finally {
+      if (previousLimit === undefined) delete process.env.MEDIA_MAX_CONCURRENT_TRANSCRIPTION_UPLOADS;
+      else process.env.MEDIA_MAX_CONCURRENT_TRANSCRIPTION_UPLOADS = previousLimit;
+    }
   });
 
   it('migration creates the media_models table', () => {
