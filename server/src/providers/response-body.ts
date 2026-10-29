@@ -66,3 +66,17 @@ export async function readProviderResponseJson<T = unknown>(res: Response, maxBy
   }
   return JSON.parse(await readProviderResponseText(res, maxBytes)) as T;
 }
+
+
+/**
+ * Reject an oversized transport chunk before decoding it into a potentially
+ * much larger JavaScript string. The line buffer is checked after decoding.
+ */
+export function assertProviderStreamChunkWithinLimit(
+  chunk: Uint8Array,
+  maxBytes = MAX_PROVIDER_STREAM_FRAME_BYTES,
+): void {
+  if (chunk.byteLength > maxBytes) {
+    throw new Error(`Provider stream chunk exceeded the ${maxBytes}-byte limit`);
+  }
+}
