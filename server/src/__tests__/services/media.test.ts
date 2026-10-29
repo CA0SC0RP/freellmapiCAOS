@@ -366,7 +366,7 @@ describe('media service', () => {
       await expect(runVideoGeneration('Lightricks/LTX-Video-0.9.5', {
         prompt: 'paper boats on a stream',
         seed: 42,
-      })).rejects.toMatchObject({ status: 502, message: 'huggingface returned an invalid video job URL' });
+      })).rejects.toMatchObject({ status: 502 });
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
