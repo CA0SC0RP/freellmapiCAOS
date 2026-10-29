@@ -50,8 +50,9 @@ describe('createPinnedLookup (custom-provider DNS pinning)', () => {
         url: '/pinned-check',
       });
     } finally {
+      const closed = once(server, 'close');
       server.close();
-      await once(server, 'close');
+      await closed;
     }
   });
 
@@ -78,8 +79,9 @@ describe('createPinnedLookup (custom-provider DNS pinning)', () => {
       await expect(reader.read()).rejects.toThrow(/idle lease expired/);
     } finally {
       server.closeAllConnections();
+      const closed = once(server, 'close');
       server.close();
-      await once(server, 'close');
+      await closed;
     }
   });
 
@@ -109,8 +111,9 @@ describe('createPinnedLookup (custom-provider DNS pinning)', () => {
       expect((await reader.read()).done).toBe(true);
     } finally {
       server.closeAllConnections();
+      const closed = once(server, 'close');
       server.close();
-      await once(server, 'close');
+      await closed;
     }
   });
 
