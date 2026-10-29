@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { createPinnedLookup, pinnedProviderFetch } from '../../lib/pinned-provider-fetch.js';
-import { assertProviderUrlAllowed, assessProviderUrl } from '../../lib/url-guard.js';
+import { assertProviderUrlAllowed } from '../../lib/url-guard.js';
 
 describe('createPinnedLookup (custom-provider DNS pinning)', () => {
   it('returns only the addresses vetted for the request and never resolves again', () => {
