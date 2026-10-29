@@ -1,5 +1,5 @@
-import type {
 import { readProviderResponseJson } from './response-body.js';
+import type {
   ChatCompletionChunk,
   ChatCompletionResponse,
   ChatMessage,
