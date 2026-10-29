@@ -6,6 +6,7 @@ import type {
   Platform,
 } from '@freellmapi/shared/types.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
+import { readProviderResponseJson, readProviderResponseText } from './response-body.js';
 import { extendedBodyParams, resolveMaxTokens } from '../lib/sampling-params.js';
 import { rescueInlineToolCalls } from '../lib/tool-call-rescue.js';
 import { extractThinkFromMessage } from '../lib/think-tags.js';
@@ -391,7 +392,7 @@ export class OpenAICompatProvider extends BaseProvider {
         ...extendedBodyParams(this.platform, options),
       }),
       // 'request' bounds: the deadline covers the body read too, so a 200
-      // whose body hangs aborts instead of stalling res.json() forever.
+      // whose body hangs aborts instead of stalling readProviderResponseJson(res) forever.
     }, options?.timeoutMs ?? this.timeoutMs, { signal: options?.signal, timeoutBounds: 'request' });
 
     recordQuotaObservationsFromResponse(res, {
@@ -404,7 +405,7 @@ export class OpenAICompatProvider extends BaseProvider {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
+      const err = await readProviderResponseJson(res).catch(() => ({}));
       const rescued = this.rescueFailedGeneration(err, options);
       if (rescued) {
         console.log(`[${this.name}] Rescued ${rescued.length} inline tool call(s) from a ${res.status} tool_use_failed (#264)`);
@@ -427,7 +428,7 @@ export class OpenAICompatProvider extends BaseProvider {
     let data: ChatCompletionResponse;
     let parseErr: unknown;
     try {
-      data = await res.json() as ChatCompletionResponse;
+      data = await readProviderResponseJson(res) as ChatCompletionResponse;
     } catch (err) {
       // An aborted body read (per-attempt deadline, client disconnect) is not
       // a malformed body — rethrow so it keeps its abort classification
@@ -538,7 +539,7 @@ export class OpenAICompatProvider extends BaseProvider {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
+      const err = await readProviderResponseJson(res).catch(() => ({}));
       const rescued = this.rescueFailedGeneration(err, options);
       if (rescued) {
         console.log(`[${this.name}] Rescued ${rescued.length} inline tool call(s) from a ${res.status} tool_use_failed (stream, #264)`);
@@ -653,7 +654,7 @@ export class OpenAICompatProvider extends BaseProvider {
     // healthy (#1557). Thrown, so health records an error without counting it
     // toward auto-disable. Provider-specific validate URLs keep their own shape.
     if (res.ok && !this.validateUrl && typeof res.text === 'function') {
-      const text = await res.text().catch(() => '');
+      const text = await readProviderResponseText(res).catch(() => '');
       try {
         JSON.parse(text);
       } catch {
@@ -688,7 +689,7 @@ export class OpenAICompatProvider extends BaseProvider {
         },
       }, 10_000, { timeoutBounds: 'request' });
       if (!res.ok) return false;
-      const body: any = await res.json().catch(() => null);
+      const body: any = await readProviderResponseJson(res).catch(() => null);
       const scope = (body && typeof body === 'object' && body.data && typeof body.data === 'object')
         ? [body.data, body]
         : [body];
