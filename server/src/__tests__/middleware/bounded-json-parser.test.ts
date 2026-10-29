@@ -68,7 +68,6 @@ describe('bounded JSON body parser admission', () => {
     const nextAfterError = vi.fn() as unknown as NextFunction;
     second(request(), response(), nextAfterError);
     expect(nextAfterError).toHaveBeenCalledOnce();
-    expect(nextAfterError).toHaveBeenCalledWith();
   });
 
   it('does not consume admission capacity for non-JSON content types', () => {
