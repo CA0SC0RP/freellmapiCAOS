@@ -694,8 +694,10 @@ describe('local and LAN destinations bypass the proxy (#951)', () => {
     const httpsSpy = stubHttpsRequest();
     const httpSpy = stubHttpRequest();
 
+    // Use a public IP so the local/LAN bypass policy cannot intentionally
+    // route this request direct; this isolates the per-key proxy rejection.
     await expect(withKeyProxy('socks5h://127.0.0.1:9051', () =>
-      proxyFetch('http://192.168.1.20:11434/api/chat', {
+      proxyFetch('https://93.184.216.34/v1/chat/completions', {
         method: 'POST',
         headers: { authorization: 'Bearer test-secret' },
         body: '{"secret":"payload"}',
