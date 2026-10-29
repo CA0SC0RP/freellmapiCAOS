@@ -888,6 +888,49 @@ export async function proxyFetch(
 }
 
 /**
+ * Fetch an untrusted HTTPS URL supplied by an upstream provider (for example,
+ * a generated-media download URL) without introducing a DNS-rebinding gap.
+ * These URLs must resolve only to public addresses and are socket-pinned to
+ * the exact vetted answer set. If configured proxy routing would be required,
+ * fail closed rather than silently bypassing it; the proxy hop cannot be pinned
+ * by this process.
+ */
+export async function pinnedExternalProviderFetch(
+  url: string,
+  init?: RequestInit,
+  platform?: string,
+  requestType: ProxyRequestType = 'unknown',
+  timeoutMs?: number,
+): Promise<Response> {
+  try {
+    const target = new URL(url);
+    if (target.protocol !== 'https:' || target.username || target.password) {
+      throw new Error('Upstream-provided download URL blocked: HTTPS without embedded credentials is required');
+    }
+    const vettedAddresses = await assertProviderUrlAllowed(url, { blockPrivate: true });
+    const bypass = shouldBypassProxy(url, platform);
+    const perKeyUrl = perKeyProxyStore.getStore() ?? '';
+    const wouldUseProxy = !bypass && Boolean(perKeyUrl || _proxyUrl);
+    if (wouldUseProxy) {
+      throw new Error('Upstream-provided download URL blocked: configured proxy cannot guarantee DNS-pinned connections');
+    }
+    if (requiresOutboundProxy(platform)) {
+      throw proxyRequiredError(platform, 'DNS-pinned download transport requires a direct route');
+    }
+
+    const response = await pinnedProviderFetch(url, { ...init, redirect: 'manual' }, vettedAddresses);
+    if (REDIRECT_STATUSES.has(response.status)) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error('Upstream-provided download URL blocked: redirects are not followed');
+    }
+    return response;
+  } catch (err) {
+    describeFetchFailure(err, url, platform);
+    throw enrichAbort(err, platform, requestType, timeoutMs);
+  }
+}
+
+/**
  * Opt-in no-direct-egress policy for sensitive platforms.
  *
  * PROXY_REQUIRED_PLATFORMS=google means that any Google provider request
