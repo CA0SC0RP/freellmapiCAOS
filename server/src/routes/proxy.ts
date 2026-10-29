@@ -10,7 +10,7 @@ import { runRerank, RerankError, rerankRetryAfterSec } from '../services/rerank.
 import { runSearch, SearchError, searchRetryAfterSec, listSearchEngines } from '../services/search.js';
 import { runDecision, DecisionError, decisionRetryAfterSec, listDecisionModels, DECISION_QUESTION_TYPES } from '../services/decision.js';
 import { retryAfterSeconds } from '../lib/retry-hint.js';
-import { runImageGeneration, runVideoGeneration, runSpeech, runTranscription, MediaError, MAX_TRANSCRIPTION_BYTES } from '../services/media.js';
+import { runImageGeneration, runVideoGeneration, runSpeech, runTranscription, acquireTranscriptionUploadSlot, MediaError, MAX_TRANSCRIPTION_BYTES } from '../services/media.js';
 import multer from 'multer';
 import { getDb } from '../db/index.js';
 import { resolveAuth, prependSystemPrompt, type ResolvedAuth } from '../lib/system-prompt.js';
@@ -1238,9 +1238,23 @@ function transcriptionBadRequest(res: Response, message: string, code?: string):
 }
 
 proxyRouter.post('/audio/transcriptions', (req: Request, res: Response, next) => {
-  // Auth before the multipart body is parsed: an unauthenticated caller's
-  // upload is never buffered.
+  // Auth and memory admission happen before Multer buffers the multipart
+  // upload. A rejected request never allocates the in-memory file buffer.
   if (!requireInferenceAuth(req, res)) return;
+  const releaseUpload = acquireTranscriptionUploadSlot();
+  if (!releaseUpload) {
+    res.setHeader('Retry-After', '1');
+    res.status(503).json({
+      error: {
+        message: 'Transcription upload capacity is temporarily full; retry shortly.',
+        type: 'server_error',
+        code: 'media_concurrency_limit',
+      },
+    });
+    return;
+  }
+  res.once('finish', releaseUpload);
+  res.once('close', releaseUpload);
   transcriptionUpload.single('file')(req, res, (err: unknown) => {
     if (err) {
       if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
