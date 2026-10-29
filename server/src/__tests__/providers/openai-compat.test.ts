@@ -246,7 +246,7 @@ describe('OpenAICompatProvider', () => {
       baseUrl: 'https://integrate.api.nvidia.com/v1',
       forceSingleToolCall: true,
     });
-    const okResponse = new Response(JSON.stringify({
+    const okResponse = () => new Response(JSON.stringify({
         id: 'x', object: 'chat.completion', created: 1, model: 'm',
         choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
@@ -255,7 +255,7 @@ describe('OpenAICompatProvider', () => {
 
     it('pins parallel_tool_calls to false when tools are present, even if the caller asked for true', async () => {
       let body: any = null;
-      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse; });
+      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse(); });
       await nim().chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm', { tools, parallel_tool_calls: true });
       expect(body.parallel_tool_calls).toBe(false);
     });
@@ -1220,11 +1220,7 @@ describe('OpenCode session header (#1639)', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       (global as any).__lastHeaders = (init as any).headers;
       const stream = new ReadableStream<Uint8Array>({ start(c) { for (const f of frames) c.enqueue(encoder.encode(f)); c.close(); } });
-      return new Response(JSON.stringify({
-          id: 'x', object: 'chat.completion', created: 1, model: 'm',
-          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
-          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) as any;
     });
     const zen = new OpenAICompatProvider({ platform: 'custom', name: 'OpenCode Go', baseUrl: 'https://zen.opencode.ai/v1' });
     for await (const _chunk of zen.streamChatCompletion('k', [{ role: 'user', content: 'hi' }], 'm')) { /* drain */ }
