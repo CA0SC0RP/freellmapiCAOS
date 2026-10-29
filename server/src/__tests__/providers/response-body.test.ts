@@ -105,6 +105,20 @@ describe('provider streaming frame limits', () => {
     }));
     await expect(readProviderResponseBytes(response, 8)).rejects.toThrow(/exceeded.*byte limit/);
   });
+
+  it('preserves binary bytes across multiple chunks while buffering incrementally', async () => {
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        controller.enqueue(new Uint8Array([4, 5]));
+        controller.enqueue(new Uint8Array([6, 7, 8, 9]));
+        controller.close();
+      },
+    }));
+    await expect(readProviderResponseBytes(response, 16)).resolves.toEqual(
+      new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+    );
+  });
 });
 
 
