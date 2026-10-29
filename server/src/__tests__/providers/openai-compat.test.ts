@@ -157,7 +157,7 @@ describe('OpenAICompatProvider', () => {
       delays.push(ms ?? 0);
       return origSetTimeout(fn, ms);
     }) as typeof setTimeout);
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'test-id',
         object: 'chat.completion',
         created: 123,
@@ -276,7 +276,7 @@ describe('OpenAICompatProvider', () => {
   });
 
   it('should throw on error response', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({ error: { message: 'Too many requests' } }), { status: 429, headers: { 'Content-Type': 'application/json' } }) as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Too many requests' } }), { status: 429, headers: { 'Content-Type': 'application/json' } }) as any);
 
     await expect(
       provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model')
@@ -408,7 +408,7 @@ describe('OpenAICompatProvider', () => {
   });
 
   it('validateKey preserves the provider reason on confirmed 401', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({ error: { message: 'This token has expired' } }), { status: 401, headers: { 'Content-Type': 'application/json' } }) as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'This token has expired' } }), { status: 401, headers: { 'Content-Type': 'application/json' } }) as any);
     expect(await provider.validateKey('bad')).toEqual({
       valid: false,
       error: 'TestProvider key validation failed (HTTP 401): This token has expired',
@@ -421,7 +421,7 @@ describe('OpenAICompatProvider', () => {
   });
 
   it('folds reasoning_content into content when content is empty (Z.ai glm-4.5-flash style)', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -436,7 +436,7 @@ describe('OpenAICompatProvider', () => {
   });
 
   it('flattens array content into a string (Mistral magistral style)', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -544,7 +544,7 @@ describe('OpenAICompatProvider', () => {
   });
 
   it('folds reasoning into content when content is empty (Ollama style — bare `reasoning` field)', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -559,7 +559,7 @@ describe('OpenAICompatProvider', () => {
   });
 
   it('prefers reasoning_content over reasoning when both are present', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -574,7 +574,7 @@ describe('OpenAICompatProvider', () => {
   });
 
   it('does NOT fold reasoning_content when tool_calls are present', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -595,7 +595,7 @@ describe('OpenAICompatProvider', () => {
   });
 
   it('leaves real string content untouched', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -715,7 +715,7 @@ describe('OpenAICompatProvider - platform instances', () => {
     };
 
     it('non-stream: rescues failed_generation into structured tool_calls', async () => {
-      vi.spyOn(global, 'fetch').new Response(JSON.stringify(failBody), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(failBody), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
 
       const r = await provider.chatCompletion('key', [{ role: 'user', content: 'read sample.txt' }], 'llama-3.3-70b-versatile', { tools, tool_choice: 'auto' });
       expect(r.choices[0].finish_reason).toBe('tool_calls');
@@ -726,7 +726,7 @@ describe('OpenAICompatProvider - platform instances', () => {
     });
 
     it('stream: yields a synthesized tool_calls turn instead of throwing', async () => {
-      vi.spyOn(global, 'fetch').new Response(JSON.stringify(failBody), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(failBody), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
 
       const chunks: any[] = [];
       for await (const c of provider.streamChatCompletion('key', [{ role: 'user', content: 'read sample.txt' }], 'llama-3.3-70b-versatile', { tools, tool_choice: 'auto' })) {
@@ -745,7 +745,7 @@ describe('OpenAICompatProvider - platform instances', () => {
     it('declines the rescue when the recovered arguments violate the schema', async () => {
       process.env.VALIDATE_TOOL_ARGUMENTS = '1';
       try {
-        vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+        vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
             ...failBody,
             error: { ...failBody.error, failed_generation: '<function=read={"nope": "sample.txt"}</function>' },
           }), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
@@ -761,7 +761,7 @@ describe('OpenAICompatProvider - platform instances', () => {
     it('still rescues schema-valid arguments while the verdict is on', async () => {
       process.env.VALIDATE_TOOL_ARGUMENTS = '1';
       try {
-        vi.spyOn(global, 'fetch').new Response(JSON.stringify(failBody), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
+        vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(failBody), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
 
         const r = await provider.chatCompletion('key', [{ role: 'user', content: 'read sample.txt' }], 'llama-3.3-70b-versatile', { tools, tool_choice: 'auto' });
         expect(JSON.parse(r.choices[0].message.tool_calls![0].function.arguments)).toEqual({ file_path: 'sample.txt' });
