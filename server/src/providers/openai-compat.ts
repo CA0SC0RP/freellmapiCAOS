@@ -470,13 +470,13 @@ export class OpenAICompatProvider extends BaseProvider {
       // sending JSON (Content-Type: application/json). Without that hint,
       // the parser is more likely choking on NDJSON, native API output, or
       // HTML — all "wrong endpoint" cases. This is the safe default.
-      const afterJsonError = /Unexpected non-whitespace character after JSON at position (\\d+)/.exec(msg);
+      const afterJsonError = /Unexpected non-whitespace character after JSON at position (\d+)/.exec(msg);
       const errorPosition = afterJsonError ? Number(afterJsonError[1]) : -1;
       // V8 reports the second document's first character for NDJSON, after a
       // newline separator. Garbage immediately after a complete JSON document
       // without a line break is more consistent with a body cut/corrupted
       // mid-token. Explicit NDJSON/SSE media types always remain wrong-endpoint.
-      const hasLineBreakBeforeError = errorPosition >= 0 && /[\\r\\n]/.test(responseText.slice(0, errorPosition));
+      const hasLineBreakBeforeError = errorPosition >= 0 && /[\r\n]/.test(responseText.slice(0, errorPosition));
       const looksTruncated =
         /Unexpected end of JSON input/.test(msg) ||
         (/Unexpected non-whitespace character after JSON at position/.test(msg) &&
