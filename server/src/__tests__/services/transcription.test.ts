@@ -123,6 +123,35 @@ describe('transcription service', () => {
     expect(Buffer.from(await file.arrayBuffer()).equals(AUDIO)).toBe(true);
   });
 
+  it('passes the caller abort signal to the upstream transcription request', async () => {
+    addKey('groq');
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      expect(init.signal).toBe(controller.signal);
+      return jsonResponse({ text: 'cancel-aware' });
+    });
+    globalThis.fetch = fetchMock as any;
+
+    const result = await runTranscription('whisper-large-v3-turbo', params({ signal: controller.signal }));
+    expect(result.text).toBe('cancel-aware');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fail over to another provider after the client aborts', async () => {
+    addKey('groq');
+    addKey('cloudflare', 'acct123:token456');
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => {
+      controller.abort();
+      throw new DOMException('The operation was aborted', 'AbortError');
+    });
+    globalThis.fetch = fetchMock as any;
+
+    await expect(runTranscription('auto', params({ signal: controller.signal })))
+      .rejects.toMatchObject({ status: 499 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('groq: requests verbose_json upstream and passes segments through', async () => {
     addKey('groq');
     const segments = [{ id: 0, start: 0, end: 1.5, text: 'hello' }];
