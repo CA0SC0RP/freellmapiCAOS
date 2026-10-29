@@ -82,6 +82,52 @@ export async function readProviderResponseText(
   return new TextDecoder().decode(bytes);
 }
 
+/** Read bounded binary response bytes without first allocating the entire upstream body. */
+export async function readProviderResponseBytes(
+  response: Response | ResponseBodyLike,
+  maxBytes = MAX_PROVIDER_RESPONSE_BYTES,
+): Promise<Uint8Array> {
+  const res = response as ResponseBodyLike;
+  const declaredHeader = res.headers?.get?.('content-length');
+  const declared = declaredHeader == null || declaredHeader.trim() === '' ? NaN : Number(declaredHeader);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    try { await res.body?.cancel?.(); } catch { /* already closed */ }
+    throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
+  }
+
+  const reader = res.body?.getReader?.();
+  if (!reader) {
+    if ('body' in res && res.body === null) return new Uint8Array(0);
+    throw new Error('Provider response has no readable stream; refusing an unbounded body read');
+  }
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!isUint8ArrayView(value)) throw new Error('Provider response stream returned an invalid chunk');
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
+      chunks.push(value);
+    }
+  } catch (error) {
+    try { await reader.cancel(); } catch { /* already closed or cancelled */ }
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 /** Parse bounded JSON from an upstream provider without unbounded json() fallback reads. */
 export async function readProviderResponseJson<T = unknown>(
   res: Response | ResponseBodyLike,
