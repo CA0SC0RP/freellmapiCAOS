@@ -2,10 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, 'fix/custom-provider-dns-pinning']
+    branches: [main]
+  # Security hardening is developed in stacked PRs. Do not restrict PR CI to
+  # main: otherwise a PR targeting another security branch receives no checks.
   pull_request:
-    types: [opened, synchronize, reopened]
-    branches: [main, 'fix/ssrf-dns-fail-closed']
 
 jobs:
   test:
@@ -30,9 +30,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Generate an ephemeral, test-only HTTPS certificate. It is trusted only
-      # by Node processes in this CI job, so tests can distinguish hostname
-      # validation from an untrusted-certificate failure without storing keys.
+      # Generate ephemeral test-only HTTPS certificates for transport tests.
+      # They are trusted only by Node processes in this CI job; no keys are stored.
       - name: Prepare ephemeral TLS test certificate
         shell: bash
         run: |
@@ -50,17 +49,13 @@ jobs:
       - name: Check migration round trip
         run: npm run test:migrations
 
-      # COVERAGE makes the server suite collect coverage inside this run rather
-      # than running the whole suite a second time. Only the Node 22 leg sets it,
-      # so the Node 20 leg keeps uninstrumented timings. Coverage is reporting
-      # only; there are no thresholds and it never fails the build.
+      # COVERAGE is reporting only and runs on Node 22 to avoid doubling suite time.
       - name: Run tests
         env:
           COVERAGE: ${{ matrix.node-version == '22' && '1' || '' }}
         run: npm test
 
-      # server + cli only; the client has its own backlog of ESLint violations
-      # and is brought in under a separate change.
+      # server + cli only; the client has its own backlog of ESLint violations.
       - name: Lint
         run: npm run lint
 
