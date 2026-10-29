@@ -18,6 +18,7 @@ import {
   PROXY_SCHEMES,
   PROXY_MODES,
   proxyFetch,
+  pinnedExternalProviderFetch,
   describeAbort,
   withKeyProxy,
   probeProxyUrl,
@@ -1288,3 +1289,28 @@ describe('fetch failed carries its cause (#1373)', () => {
     await expect(proxyFetch('https://api.example.com/v1')).rejects.toThrow(/^fetch failed$/);
   });
 });
+
+describe('pinnedExternalProviderFetch (upstream-supplied download URLs)', () => {
+  it('requires HTTPS and rejects private destinations', async () => {
+    await expect(pinnedExternalProviderFetch('http://8.8.8.8/file.mp4'))
+      .rejects.toThrow(/HTTPS/);
+    await expect(pinnedExternalProviderFetch('https://127.0.0.1/file.mp4'))
+      .rejects.toThrow(/private address/);
+  });
+
+  it('does not follow redirects from an upstream-supplied download URL', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('redirect body', {
+        status: 302,
+        headers: { location: 'https://127.0.0.1/private' },
+      }),
+    );
+    try {
+      await expect(pinnedExternalProviderFetch('https://8.8.8.8/file.mp4'))
+        .rejects.toThrow(/redirects are not followed/);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});
+

@@ -14,11 +14,11 @@ import { secondsUntilNextMonth } from './key-budget.js';
 import { noteBudgetAlerts } from './budget-alerts.js';
 import { getClientContext } from '../lib/client-context.js';
 import { reserveProviderCredential } from './provider-credential.js';
-import { proxyFetch } from '../lib/proxy.js';
+import { pinnedExternalProviderFetch, proxyFetch } from '../lib/proxy.js';
 import { bearerAuthHeader } from '../lib/credential.js';
-import { assessProviderUrl } from '../lib/url-guard.js';
 import { isOnCooldown, setCooldown } from './ratelimit.js';
 import { markKeyHealthyFromRequest } from './health.js';
+import { readProviderResponseBytes, readProviderResponseJson, readProviderResponseText } from '../providers/response-body.js';
 import { SPEECHIFY_BASE_URL, SPEECHIFY_VERSION } from '../providers/speechify.js';
 import { TYPHOON_BASE_URL } from '../providers/typhoon.js';
 import { ELECTRONHUB_BASE_URL } from '../providers/electronhub.js';
@@ -199,6 +199,16 @@ function geminiVoice(requested?: string): string {
 
 // Media generations are slower than chat — a cold FLUX/SDXL run can take 30-60s.
 const FETCH_TIMEOUT_MS = 60_000;
+// Media payloads are larger than chat JSON, but still need hard upstream caps.
+const MAX_IMAGE_RESPONSE_BYTES = 32 * 1024 * 1024;
+const MAX_AUDIO_RESPONSE_BYTES = 64 * 1024 * 1024;
+const MAX_VIDEO_RESPONSE_BYTES = 256 * 1024 * 1024;
+const MAX_TRANSCRIPTION_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+/** Create a Buffer view over already-bounded bytes without copying large media payloads. */
+function bufferView(bytes: Uint8Array): Buffer {
+  return Buffer.from(bytes.buffer as ArrayBuffer, bytes.byteOffset, bytes.byteLength);
+}
 // Video providers submit long-running jobs and can legitimately need several
 // minutes before the MP4 is ready. This is still bounded end-to-end.
 const VIDEO_FETCH_TIMEOUT_MS = 5 * 60_000;
@@ -244,10 +254,13 @@ async function mediaFetch(
    *  top of the per-request timeout so a departed client drops the upstream
    *  request instead of leaving it to run out the clock. */
   clientSignal?: AbortSignal,
+  /** Pin provider-supplied download URLs to a vetted public DNS answer set. */
+  pinPublicDestination = false,
 ): Promise<Response> {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = clientSignal ? AbortSignal.any([timeoutSignal, clientSignal]) : timeoutSignal;
-  const r = await proxyFetch(
+  const fetcher = pinPublicDestination ? pinnedExternalProviderFetch : proxyFetch;
+  const r = await fetcher(
     url,
     { ...init, signal },
     platform,
@@ -255,7 +268,7 @@ async function mediaFetch(
     timeoutMs,
   );
   if (!r.ok) {
-    const body = await r.text().catch(() => '');
+    const body = await readProviderResponseText(r).catch(() => '');
     throw new MediaError(
       `${platform} ${r.status}: ${body.slice(0, 200)}`,
       r.status,
@@ -372,7 +385,7 @@ async function callImageProvider(
         body: JSON.stringify({ model: row.model_id, prompt: p.prompt, n: p.n ?? 1,
           ...(p.size ? { size: p.size } : {}), response_format: 'b64_json' }),
       });
-      const j = await r.json() as { data?: { b64_json?: unknown }[]; error?: unknown } | null;
+      const j = await readProviderResponseJson(r, MAX_IMAGE_RESPONSE_BYTES) as { data?: { b64_json?: unknown }[]; error?: unknown } | null;
       if (j?.error || !Array.isArray(j?.data) || !j.data.length ||
           j.data.some(i => !i || typeof i.b64_json !== 'string' || !i.b64_json.trim())) {
         throw new MediaError('plugsky returned no image data', 502);
@@ -388,7 +401,7 @@ async function callImageProvider(
         body: JSON.stringify({ model: row.model_id, prompt: p.prompt, n: p.n ?? 1,
           size: p.size ?? '1024x1024', response_format: 'b64_json' }),
       });
-      const j = await r.json() as { data?: { b64_json?: unknown }[]; error?: unknown } | null;
+      const j = await readProviderResponseJson(r, MAX_IMAGE_RESPONSE_BYTES) as { data?: { b64_json?: unknown }[]; error?: unknown } | null;
       if (j?.error || !Array.isArray(j?.data) || !j.data.length ||
           j.data.some(i => !i || typeof i.b64_json !== 'string' || !i.b64_json.trim())) {
         throw new MediaError('kenari returned no image data', 502);
@@ -405,7 +418,7 @@ async function callImageProvider(
         headers: { 'Content-Type': 'application/json', ...bearerAuthHeader(key) },
         body: JSON.stringify(body),
       });
-      const j = (await r.json()) as { data?: { b64_json?: string; url?: string }[] };
+      const j = (await readProviderResponseJson(r, MAX_IMAGE_RESPONSE_BYTES)) as { data?: { b64_json?: string; url?: string }[] };
       return (j.data ?? []).map(i => ({ b64_json: i.b64_json, url: i.url }));
     }
     case 'nvidia': {
@@ -437,14 +450,14 @@ async function callImageProvider(
         headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify(body),
       });
-      const j = (await r.json()) as { artifacts?: { base64?: string }[] };
+      const j = (await readProviderResponseJson(r, MAX_IMAGE_RESPONSE_BYTES)) as { artifacts?: { base64?: string }[] };
       return (j.artifacts ?? []).map(a => ({ b64_json: a.base64 }));
     }
     case 'pollinations': {
       // Keyless GET image endpoint returns raw image bytes.
       const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(p.prompt)}?width=${w}&height=${h}&nologo=true&model=${encodeURIComponent(row.model_id)}`;
       const r = await mediaFetch(url, 'pollinations', 'image', { method: 'GET' });
-      const buf = Buffer.from(await r.arrayBuffer());
+      const buf = bufferView(await readProviderResponseBytes(r, MAX_IMAGE_RESPONSE_BYTES));
       return [{ b64_json: buf.toString('base64') }];
     }
     case 'cloudflare': {
@@ -477,12 +490,12 @@ async function callImageProvider(
       // FLUX returns JSON { result: { image: <b64> } }; SDXL returns raw PNG bytes.
       const ct = r.headers.get('content-type') ?? '';
       if (ct.includes('application/json')) {
-        const j = (await r.json()) as { result?: { image?: string } };
+        const j = (await readProviderResponseJson(r, MAX_IMAGE_RESPONSE_BYTES)) as { result?: { image?: string } };
         const b64 = j.result?.image;
         if (!b64) throw new MediaError('cloudflare returned no image', 502);
         return [{ b64_json: b64 }];
       }
-      const buf = Buffer.from(await r.arrayBuffer());
+      const buf = bufferView(await readProviderResponseBytes(r, MAX_IMAGE_RESPONSE_BYTES));
       return [{ b64_json: buf.toString('base64') }];
     }
     case 'siliconflow': {
@@ -491,7 +504,7 @@ async function callImageProvider(
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify({ model: row.model_id, prompt: p.prompt, image_size: `${w}x${h}` }),
       });
-      const j = (await r.json()) as { images?: { url?: string }[]; data?: { url?: string }[] };
+      const j = (await readProviderResponseJson(r, MAX_IMAGE_RESPONSE_BYTES)) as { images?: { url?: string }[]; data?: { url?: string }[] };
       return (j.images ?? j.data ?? []).map(i => ({ url: i.url }));
     }
     default:
@@ -523,7 +536,7 @@ async function callHuggingFaceVideo(
       ...(p.seed !== undefined ? { seed: p.seed } : {}),
     }),
   }, remaining(), clientSignal);
-  const queue = (await submitted.json()) as {
+  const queue = (await readProviderResponseJson(submitted)) as {
     request_id?: string;
     status?: string;
     response_url?: string;
@@ -554,7 +567,7 @@ async function callHuggingFaceVideo(
       method: 'GET',
       headers: { Authorization: `Bearer ${key}` },
     }, remaining(), clientSignal);
-    const state = (await polled.json()) as { status?: string; error?: string };
+    const state = (await readProviderResponseJson(polled)) as { status?: string; error?: string };
     if (!state.status) throw new MediaError('huggingface returned an invalid video job status', 502);
     status = state.status;
   }
@@ -563,21 +576,16 @@ async function callHuggingFaceVideo(
     method: 'GET',
     headers: { Authorization: `Bearer ${key}` },
   }, remaining(), clientSignal);
-  const result = (await completed.json()) as { video?: { url?: string; content_type?: string } };
+  const result = (await readProviderResponseJson(completed)) as { video?: { url?: string; content_type?: string } };
   const videoUrl = result.video?.url;
   if (!videoUrl) throw new MediaError('huggingface returned no video URL', 502);
-  // Every other URL this adapter contacts is built from constants; this one
-  // comes out of an upstream JSON body, which is exactly the shape #440's
-  // guard exists for. Refuse anything that is not plain http(s) on a routable
-  // address before spending a request on it — a result URL pointing at cloud
-  // metadata or a link-local address would otherwise be fetched and streamed
-  // straight back to the caller.
-  const verdict = await assessProviderUrl(videoUrl);
-  if (!verdict.allowed) {
-    throw new MediaError(`huggingface returned an unusable video URL: ${verdict.reason}`, 502);
-  }
-  const downloaded = await mediaFetch(videoUrl, 'huggingface', 'video', { method: 'GET' }, remaining(), clientSignal);
-  const video = Buffer.from(await downloaded.arrayBuffer());
+  // This URL is supplied by an upstream response, so fetch it only over HTTPS,
+  // reject private destinations and redirects, and pin the socket to the vetted
+  // public DNS answer set to prevent a DNS-rebinding gap.
+  const downloaded = await mediaFetch(
+    videoUrl, 'huggingface', 'video', { method: 'GET' }, remaining(), clientSignal, true,
+  );
+  const video = bufferView(await readProviderResponseBytes(downloaded, MAX_VIDEO_RESPONSE_BYTES));
   return {
     video,
     contentType: downloaded.headers.get('content-type') ?? result.video?.content_type ?? 'video/mp4',
@@ -620,7 +628,7 @@ async function callVideoProvider(
         clientSignal,
       );
       return {
-        video: Buffer.from(await r.arrayBuffer()),
+        video: bufferView(await readProviderResponseBytes(r, MAX_VIDEO_RESPONSE_BYTES)),
         contentType: r.headers.get('content-type') ?? 'video/mp4',
       };
     }
@@ -649,7 +657,7 @@ async function callSpeechProvider(
         headers: { 'Content-Type': 'application/json', ...bearerAuthHeader(key) },
         body: JSON.stringify({ model: row.model_id, text: p.input, voice }),
       });
-      const body: unknown = await r.json();
+      const body: unknown = await readProviderResponseJson(r, MAX_AUDIO_RESPONSE_BYTES);
       if (body && typeof body === 'object' && 'queued' in body && body.queued === true) {
         // The website uses session-based polling for queued jobs; its
         // API status endpoint did not expose our tested job. Never follow an
@@ -662,25 +670,20 @@ async function callSpeechProvider(
       // follow redirects or download arbitrary URLs supplied by an upstream.
       const output = await mediaFetch(url, 'freeai', 'audio', { method: 'GET', redirect: 'error' });
       const maxBytes = 20 * 1024 * 1024;
-      if (Number(output.headers.get('content-length')) > maxBytes || !output.body) {
-        await output.body?.cancel();
-        throw new MediaError('Free.ai speech output is missing or too large', 502);
+      if (!output.body) {
+        throw new MediaError('Free.ai speech output is missing', 502);
       }
-      const reader = output.body.getReader(), chunks: Buffer[] = [];
-      let size = 0;
+      // Use the shared bounded reader so a failed stream is cancelled and the
+      // response is not retained twice as per-chunk Buffers plus Buffer.concat.
+      let audio: Buffer;
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          size += value.length;
-          if (size > maxBytes) {
-            await reader.cancel();
-            throw new MediaError('Free.ai speech output is too large', 502);
-          }
-          chunks.push(Buffer.from(value));
+        audio = bufferView(await readProviderResponseBytes(output, maxBytes));
+      } catch (error) {
+        if (error instanceof Error && /exceeded.*byte limit/.test(error.message)) {
+          throw new MediaError('Free.ai speech output is too large', 502);
         }
-      } finally { reader.releaseLock(); }
-      const audio = Buffer.concat(chunks);
+        throw error;
+      }
       if (audio.length <= 44 || audio.toString('ascii', 0, 4) !== 'RIFF' || audio.toString('ascii', 8, 12) !== 'WAVE') {
         throw new MediaError('Free.ai returned no recognized WAV audio', 502);
       }
@@ -700,7 +703,7 @@ async function callSpeechProvider(
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}`, 'Speechify-Version': SPEECHIFY_VERSION },
         body: JSON.stringify({ model: row.model_id, input: p.input, voice_id: voice, audio_format: fmt }),
       });
-      const j = await r.json() as { audio_data?: unknown; audio_format?: unknown };
+      const j = await readProviderResponseJson(r, MAX_AUDIO_RESPONSE_BYTES) as { audio_data?: unknown; audio_format?: unknown };
       const b64 = j.audio_data;
       if (typeof b64 !== 'string' || !b64 || b64.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(b64)) {
         throw new MediaError('Speechify returned missing or invalid base64 audio', 502);
@@ -724,7 +727,7 @@ async function callSpeechProvider(
         headers: { 'Content-Type': 'application/json', ...bearerAuthHeader(key) },
         body: JSON.stringify({ model: row.model_id, input: p.input, voice, response_format: format }),
       });
-      const audio = Buffer.from(await r.arrayBuffer());
+      const audio = bufferView(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES));
       const wav = audio.length > 44 && audio.toString('ascii', 0, 4) === 'RIFF'
         && audio.toString('ascii', 8, 12) === 'WAVE';
       const mp3 = audio.length > 10 && (audio.toString('ascii', 0, 3) === 'ID3'
@@ -744,7 +747,7 @@ async function callSpeechProvider(
         body: JSON.stringify(body),
       });
       return {
-        audio: Buffer.from(await r.arrayBuffer()),
+        audio: bufferView(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES)),
         contentType: r.headers.get('content-type') ?? contentTypeFor(fmt),
       };
     }
@@ -757,7 +760,7 @@ async function callSpeechProvider(
         // OpenAI's default `alloy` must never be sent as `lang`.
         body: JSON.stringify({ prompt: p.input, lang: 'en' }),
       });
-      const j = (await r.json()) as { result?: { audio?: string } };
+      const j = (await readProviderResponseJson(r, MAX_AUDIO_RESPONSE_BYTES)) as { result?: { audio?: string } };
       const b64 = j.result?.audio;
       if (!b64) throw new MediaError('cloudflare returned no audio', 502);
       return { audio: Buffer.from(b64, 'base64'), contentType: 'audio/mpeg' };
@@ -774,7 +777,7 @@ async function callSpeechProvider(
           response_format: fmt,
         }),
       });
-      return { audio: Buffer.from(await r.arrayBuffer()), contentType: contentTypeFor(fmt) };
+      return { audio: bufferView(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES)), contentType: contentTypeFor(fmt) };
     }
     case 'pollinations': {
       // OpenAI-shaped chat-completions with the audio modality returns b64 audio.
@@ -790,7 +793,7 @@ async function callSpeechProvider(
           messages: [{ role: 'user', content: p.input }],
         }),
       });
-      const j = (await r.json()) as { choices?: { message?: { audio?: { data?: string } } }[] };
+      const j = (await readProviderResponseJson(r, MAX_AUDIO_RESPONSE_BYTES)) as { choices?: { message?: { audio?: { data?: string } } }[] };
       const b64 = j.choices?.[0]?.message?.audio?.data;
       if (!b64) throw new MediaError('pollinations returned no audio', 502);
       return { audio: Buffer.from(b64, 'base64'), contentType: contentTypeFor(p.format ?? 'mp3') };
@@ -814,7 +817,7 @@ async function callSpeechProvider(
           }),
         },
       );
-      const j = (await r.json()) as {
+      const j = (await readProviderResponseJson(r, MAX_AUDIO_RESPONSE_BYTES)) as {
         candidates?: { content?: { parts?: { inlineData?: { data?: string; mimeType?: string } }[] } }[];
       };
       const part = j.candidates?.[0]?.content?.parts?.find(pt => pt.inlineData?.data);
@@ -1125,7 +1128,7 @@ async function callTranscriptionProvider(
       const r = await mediaFetch('https://api.mistral.ai/v1/audio/transcriptions', 'mistral', 'transcription', {
         method: 'POST', redirect: 'error', headers: { ...bearerAuthHeader(key) }, body: form,
       });
-      const j = await r.json() as { text?: unknown; language?: unknown; segments?: unknown; error?: unknown } | null;
+      const j = await readProviderResponseJson(r, MAX_TRANSCRIPTION_RESPONSE_BYTES) as { text?: unknown; language?: unknown; segments?: unknown; error?: unknown } | null;
       if (j?.error || typeof j?.text !== 'string') throw new MediaError('mistral returned no transcription text', 502);
       return { text: j.text, language: typeof j.language === 'string' ? j.language : undefined,
         segments: Array.isArray(j.segments) ? j.segments : undefined };
@@ -1142,7 +1145,7 @@ async function callTranscriptionProvider(
         headers: { ...bearerAuthHeader(key) },
         body: form,
       });
-      const j = (await r.json()) as { text?: unknown } | null;
+      const j = (await readProviderResponseJson(r, MAX_TRANSCRIPTION_RESPONSE_BYTES)) as { text?: unknown } | null;
       if (!j || typeof j.text !== 'string') throw new MediaError('typhoon returned no transcription text', 502);
       return { text: j.text };
     }
@@ -1167,7 +1170,7 @@ async function callTranscriptionProvider(
         headers: { ...bearerAuthHeader(key) },
         body: form,
       });
-      const j = (await r.json()) as { text?: string; language?: string; duration?: number; segments?: unknown[] };
+      const j = (await readProviderResponseJson(r, MAX_TRANSCRIPTION_RESPONSE_BYTES)) as { text?: string; language?: string; duration?: number; segments?: unknown[] };
       if (typeof j.text !== 'string') throw new MediaError('custom endpoint returned no transcription text', 502);
       return { text: j.text, language: j.language, duration: j.duration, segments: j.segments };
     }
@@ -1188,7 +1191,7 @@ async function callTranscriptionProvider(
         headers: { Authorization: `Bearer ${key}` },
         body: form,
       });
-      const j = (await r.json()) as { text?: string; language?: string; duration?: number; segments?: unknown[] };
+      const j = (await readProviderResponseJson(r, MAX_TRANSCRIPTION_RESPONSE_BYTES)) as { text?: string; language?: string; duration?: number; segments?: unknown[] };
       if (typeof j.text !== 'string') throw new MediaError('groq returned no transcription text', 502);
       return { text: j.text, language: j.language, duration: j.duration, segments: j.segments };
     }
@@ -1211,7 +1214,7 @@ async function callTranscriptionProvider(
             body: p.file,
           };
       const r = await mediaFetch(url, 'cloudflare', 'transcription', init);
-      const j = (await r.json()) as {
+      const j = (await readProviderResponseJson(r, MAX_TRANSCRIPTION_RESPONSE_BYTES)) as {
         result?: {
           text?: string;
           vtt?: string;
