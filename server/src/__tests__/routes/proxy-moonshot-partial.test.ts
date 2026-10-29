@@ -82,7 +82,7 @@ describe('Moonshot `partial` prefill round trip (#1038)', () => {
 
     // The custom-platform SSRF guard resolves public hosts at save time and on
     // every request; answer with a public address so no real DNS is needed.
-    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '203.0.113.10', family: 4 }] as any);
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
 
     const moonshot = await request(app, 'POST', '/api/keys/custom', {
       baseUrl: 'https://api.moonshot.ai/v1',
@@ -101,7 +101,7 @@ describe('Moonshot `partial` prefill round trip (#1038)', () => {
   });
 
   beforeEach(() => {
-    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '203.0.113.10', family: 4 }] as any);
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
   });
 
   afterEach(() => {
