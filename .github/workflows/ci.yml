@@ -38,15 +38,7 @@ jobs:
           set -euo pipefail
           TLS_DIR="$RUNNER_TEMP/pinned-provider-tls"
           mkdir -p "$TLS_DIR"
-          openssl req -x509 -newkey rsa:2048 -nodes \\
-            -keyout "$TLS_DIR/key.pem" \\
-            -out "$TLS_DIR/cert.pem" \\
-            -days 2 \\
-            -subj "/CN=provider.test" \\
-            -addext "subjectAltName=DNS:provider.test" \\
-            -addext "basicConstraints=critical,CA:TRUE" \\
-            -addext "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign" \\
-            -addext "extendedKeyUsage=serverAuth"
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TLS_DIR/key.pem" -out "$TLS_DIR/cert.pem" -days 2 -subj "/CN=provider.test" -addext "subjectAltName=DNS:provider.test" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign" -addext "extendedKeyUsage=serverAuth"
           echo "PINNED_PROVIDER_TEST_CERT=$TLS_DIR/cert.pem" >> "$GITHUB_ENV"
           echo "PINNED_PROVIDER_TEST_KEY=$TLS_DIR/key.pem" >> "$GITHUB_ENV"
           echo "NODE_EXTRA_CA_CERTS=$TLS_DIR/cert.pem" >> "$GITHUB_ENV"
