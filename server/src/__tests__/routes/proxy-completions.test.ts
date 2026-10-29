@@ -69,10 +69,7 @@ describe('POST /v1/completions', () => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
         capturedBody = JSON.parse(String(init?.body));
-        return {
-          ok: true,
-          headers: new Headers(),
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-completion',
             object: 'chat.completion',
             created: 123,
@@ -83,8 +80,7 @@ describe('POST /v1/completions', () => {
               finish_reason: 'stop',
             }],
             usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -123,10 +119,7 @@ describe('POST /v1/completions', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
-        return {
-          ok: true,
-          headers: new Headers(),
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-nousage',
             object: 'chat.completion',
             created: 123,
@@ -136,8 +129,7 @@ describe('POST /v1/completions', () => {
               message: { role: 'assistant', content: ' = 42;' },
               finish_reason: 'stop',
             }],
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -164,10 +156,7 @@ describe('POST /v1/completions', () => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
         capturedBody = JSON.parse(String(init?.body));
-        return {
-          ok: true,
-          headers: new Headers(),
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-stop',
             object: 'chat.completion',
             created: 123,
@@ -178,8 +167,7 @@ describe('POST /v1/completions', () => {
               finish_reason: 'stop',
             }],
             usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -245,10 +233,7 @@ describe('POST /v1/completions', () => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
         capturedBody = JSON.parse(String(init?.body));
-        return {
-          ok: true,
-          headers: new Headers(),
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-chat-stop',
             object: 'chat.completion',
             created: 123,
@@ -259,8 +244,7 @@ describe('POST /v1/completions', () => {
               finish_reason: 'stop',
             }],
             usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
