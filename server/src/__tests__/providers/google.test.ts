@@ -152,13 +152,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -183,13 +180,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -293,13 +287,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'Sunny, 31C.' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -374,13 +365,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -416,13 +404,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'grounded answer' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -441,13 +426,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -508,9 +490,7 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{
             content: {
               parts: [{
@@ -525,8 +505,7 @@ describe('GoogleProvider', () => {
             finishReason: 'STOP',
           }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     // 1. Check extraction
@@ -568,9 +547,7 @@ describe('GoogleProvider', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBodies.push(JSON.parse((init as any).body));
       if (capturedBodies.length === 1) {
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             candidates: [{
               content: {
                 parts: [{
@@ -585,16 +562,12 @@ describe('GoogleProvider', () => {
               finishReason: 'STOP',
             }],
             usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'Cold and windy.' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -634,16 +607,13 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{
             content: { parts: [{ text: 'ok' }] },
             finishReason: 'STOP',
           }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -830,13 +800,10 @@ describe('GoogleProvider', () => {
     const captured: { signal?: AbortSignal } = {};
     global.fetch = (async (_url: any, init: any) => {
       captured.signal = init?.signal;
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     }) as any;
     return { signal: captured as any, restored: () => { global.fetch = origFetch; } };
   }
