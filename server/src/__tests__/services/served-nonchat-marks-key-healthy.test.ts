@@ -8,6 +8,7 @@ import { runRerank } from '../../services/rerank.js';
 import { runDecision } from '../../services/decision.js';
 import { runImageGeneration } from '../../services/media.js';
 import { seedDecisionModels } from '../helpers/decision-models.js';
+import dns from 'node:dns';
 
 // A served request is the strongest "this key works" evidence there is, and
 // every surface that spends a key from the 'healthy'/'unknown' pool must act
@@ -47,6 +48,7 @@ function mockFetch(handler: (url: string, init: RequestInit) => Response) {
 
 describe('a served non-chat request marks its key as working (#1493, #1612)', () => {
   beforeEach(() => {
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
     process.env.ENCRYPTION_KEY = '0'.repeat(64);
     initDb(':memory:');
     clearAllCooldowns(Number.MAX_SAFE_INTEGER);
@@ -59,7 +61,7 @@ describe('a served non-chat request marks its key as working (#1493, #1612)', ()
   });
 
   it('embeddings: a served embedding promotes an unknown key', async () => {
-    const keyId = addKey('custom', 'unknown', 'https://embeddings.example/v1');
+    const keyId = addKey('custom', 'unknown', 'https://93.184.216.34/v1');
     getDb().prepare(`INSERT INTO embedding_models (family, platform, model_id, display_name, dimensions, priority, enabled, quota_label, key_id)
       VALUES ('probe-embed', 'custom', 'probe-embed', 'Probe embedding', 2, 1, 1, '', ?)`).run(keyId);
     mockFetch(() => new Response(JSON.stringify({
@@ -72,7 +74,7 @@ describe('a served non-chat request marks its key as working (#1493, #1612)', ()
   });
 
   it('embeddings: a failed embedding does not', async () => {
-    const keyId = addKey('custom', 'unknown', 'https://embeddings.example/v1');
+    const keyId = addKey('custom', 'unknown', 'https://93.184.216.34/v1');
     getDb().prepare(`INSERT INTO embedding_models (family, platform, model_id, display_name, dimensions, priority, enabled, quota_label, key_id)
       VALUES ('probe-embed', 'custom', 'probe-embed', 'Probe embedding', 2, 1, 1, '', ?)`).run(keyId);
     mockFetch(() => new Response('boom', { status: 500 }));

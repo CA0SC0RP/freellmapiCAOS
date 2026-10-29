@@ -5,6 +5,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { getSetting } from '../db/index.js';
 import { decrypt, encrypt } from './crypto.js';
 import { assertProviderUrlAllowed, isLoopbackOrPrivateHostname } from './url-guard.js';
+import { pinnedProviderFetch } from './pinned-provider-fetch.js';
 import type { ProxyMode } from '@freellmapi/shared/types.js';
 
 // #590 (per-key proxy): the SAME provider may be reached through different
@@ -836,22 +837,41 @@ export async function proxyFetch(
     // every request — a URL saved before the guard existed, edited in the DB,
     // or whose DNS now points somewhere blocked still can't reach cloud
     // metadata / link-local addresses.
+    let response: Response;
     if (platform === 'custom') {
-      await assertProviderUrlAllowed(url);
-      // Redirects are never followed for custom providers: fetch()'s default
-      // 'follow' would re-request the Location target WITHOUT re-running the
-      // guard above, so a public base_url answering 302 → an internal or
-      // metadata address would defeat the check. socksFetch (http.request)
-      // never followed redirects; forcing redirect: 'manual' here makes every
-      // path behave the same, and the 3xx is converted to an explicit error
-      // below so the operator sees why instead of a confusing empty body.
+      const vettedAddresses = await assertProviderUrlAllowed(url);
+      // A local DNS check cannot constrain DNS resolution inside a forward
+      // proxy, SOCKS server, or Fetch Relay. Refuse those routes before any
+      // provider credentials or payload are sent; direct requests use a fresh
+      // Undici dispatcher pinned to this exact vetted answer set.
+      const bypass = shouldBypassProxy(url, platform);
+      const perKeyUrl = perKeyProxyStore.getStore() ?? '';
+      const wouldUseProxy = !bypass && Boolean(perKeyUrl || _proxyUrl);
+      if (wouldUseProxy) {
+        throw new Error(
+          'Custom provider URL blocked: configured proxy/SOCKS/Fetch Relay cannot guarantee DNS-pinned upstream connections; use a direct route or disable proxy routing for this custom provider',
+        );
+      }
+      // Preserve the opt-in no-direct-egress contract: pinning is not a reason
+      // to bypass an operator's mandatory-proxy policy.
+      if (requiresOutboundProxy(platform)) {
+        throw proxyRequiredError(platform, bypass
+          ? 'proxy routing disabled or bypassed; pinned custom-provider transport cannot use the configured proxy'
+          : 'custom-provider DNS pinning requires a direct route');
+      }
+      // Redirects are never followed for custom providers; the same pinned
+      // transport must be used for exactly this origin and vetted address set.
       init = { ...init, redirect: 'manual' };
+      response = await pinnedProviderFetch(url, init, vettedAddresses);
+    } else {
+      response = await dispatchFetch(url, init, platform, requestType, timeoutMs);
     }
-
-    const response = await dispatchFetch(url, init, platform, requestType, timeoutMs);
 
     if (platform === 'custom' && REDIRECT_STATUSES.has(response.status)) {
       const location = response.headers.get('location') ?? 'an unspecified location';
+      // The redirect body is never returned to the caller. Cancel it so the
+      // request-scoped pinned dispatcher is closed rather than left alive.
+      await response.body?.cancel().catch(() => undefined);
       throw new Error(
         `Custom provider URL blocked: upstream redirected (${response.status}) to ${location}; ` +
         'redirects are not followed for custom providers, point base_url directly at the API',

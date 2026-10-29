@@ -4,6 +4,7 @@
 // the header; an upstream `Retry-After: 17` came back as a bare 429, so SDK
 // clients retried on their own aggressive defaults and burned the tier again.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import dns from 'node:dns';
 import { once } from 'node:events';
 import type { Server } from 'node:http';
 import { createApp } from '../../app.js';
@@ -17,6 +18,7 @@ let baseUrl: string;
 let token: string;
 
 beforeEach(async () => {
+  vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
   process.env.ENCRYPTION_KEY = '0'.repeat(64);
   initDb(':memory:');
   const db = getDb();

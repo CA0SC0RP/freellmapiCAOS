@@ -28,14 +28,14 @@ import net from 'node:net';
 // guard, so a public base_url answering 302 → an internal address would
 // otherwise defeat every check in this file.
 //
-// Known limitation: hostnames are resolved and classified here, but the
-// actual fetch re-resolves DNS, so a hostile authoritative DNS server could
-// still rebind between check and use. Pinning the resolved address into the
-// dispatcher is the follow-up hardening step; the always-blocked classes
-// above are also re-checked at request time (proxyFetch) which narrows the
-// window to deliberate rebinding rather than casual misuse.
+// Request-time callers receive the exact vetted address set and the direct
+// custom-provider transport pins its socket lookup to that set. Proxy/SOCKS/
+// relay routes are rejected for custom providers because this process cannot
+// constrain destination resolution performed by those remote hops. Keep this
+// module's return value coupled to the transport; never re-resolve after this
+// assessment.
 
-export type AddressClass = 'metadata' | 'link-local' | 'loopback' | 'private' | 'public';
+export type AddressClass = 'metadata' | 'link-local' | 'loopback' | 'private' | 'reserved' | 'public';
 
 const METADATA_HOSTNAMES = new Set([
   'metadata.google.internal',
@@ -65,6 +65,15 @@ function classifyIpv4(ip: string): AddressClass {
   // user-facing LLM endpoint is published.
   if (a === 100 && b >= 64 && b <= 127) return 'private';
   if (a === 0) return 'loopback'; // 0.0.0.0 → "this host"
+  // IANA special-purpose, documentation, benchmarking, multicast, and
+  // reserved-use ranges are not globally routable provider destinations.
+  if (a === 192 && b === 0 && octets[2] === 0) return 'reserved'; // 192.0.0.0/24
+  if (a === 192 && b === 0 && octets[2] === 2) return 'reserved'; // TEST-NET-1
+  if (a === 192 && b === 88 && octets[2] === 99) return 'reserved'; // deprecated 6to4 relay anycast
+  if (a === 198 && (b === 18 || b === 19)) return 'reserved'; // benchmarking
+  if (a === 198 && b === 51 && octets[2] === 100) return 'reserved'; // TEST-NET-2
+  if (a === 203 && b === 0 && octets[2] === 113) return 'reserved'; // TEST-NET-3
+  if (a >= 224) return 'reserved'; // multicast, reserved, and limited broadcast
   return 'public';
 }
 
@@ -121,6 +130,20 @@ function classifyIpv6(ip: string): AddressClass {
   if (AWS_IMDS_V6.every((h, i) => h === hextets[i])) return 'metadata';
   if ((h0 & 0xffc0) === 0xfe80) return 'link-local'; // fe80::/10
   if ((h0 & 0xfe00) === 0xfc00) return 'private'; // fc00::/7 (ULA)
+  if ((h0 & 0xff00) === 0xff00) return 'reserved'; // ff00::/8 multicast
+  if (h0 === 0x2001 && (h1 & 0xfe00) === 0) return 'reserved'; // 2001::/23 special-purpose space
+  if (h0 === 0x2001 && h1 === 0x0db8) return 'reserved'; // 2001:db8::/32 documentation
+  if (h0 === 0x3fff && (h1 & 0xfff0) === 0) return 'reserved'; // 3fff::/20 documentation
+  if (h0 === 0x2002) {
+    // 6to4 embeds an IPv4 destination in bits 16–47. Apply the IPv4 policy
+    // to the embedded address so a public IPv6 wrapper cannot mask an
+    // internal or otherwise non-public IPv4 target.
+    const embeddedClass = classifyIpv4(`${h1 >> 8}.${h1 & 0xff}.${h2 >> 8}.${h2 & 0xff}`);
+    return embeddedClass === 'private' || embeddedClass === 'loopback' ? 'reserved' : embeddedClass;
+  }
+  // Only global-unicast 2000::/3 is considered public by this guard. This
+  // deliberately blocks other special-use IPv6 space by default.
+  if ((h0 & 0xe000) !== 0x2000) return 'reserved';
   return 'public';
 }
 
@@ -177,6 +200,8 @@ export function isLoopbackOrPrivateUrl(rawUrl: string | null | undefined): boole
 export interface UrlAssessment {
   allowed: boolean;
   reason?: string;
+  /** Exact DNS/IP set assessed for this request; absent for save-time offline allowances. */
+  addresses?: string[];
 }
 
 export interface AssessOptions {
@@ -184,6 +209,9 @@ export interface AssessOptions {
   resolve?: (hostname: string) => Promise<string[]>;
   // Overrides the env flag; when true, loopback/private addresses are blocked.
   blockPrivate?: boolean;
+  // Request-time checks fail closed on DNS errors; save-time checks may allow
+  // offline local endpoints to be stored and will be repeated before use.
+  failOnResolutionError?: boolean;
 }
 
 async function defaultResolve(hostname: string): Promise<string[]> {
@@ -226,21 +254,34 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
     try {
       addresses = await (opts.resolve ?? defaultResolve)(hostname);
     } catch {
-      // Unresolvable now may resolve later (device not on the LAN yet, DNS
-      // hiccup). Saving is harmless — the request-time check runs again.
-      return { allowed: true };
+      // Save-time validation may permit offline local endpoints to be stored.
+      // At request time, a DNS failure must fail closed: fetch() would resolve
+      // the hostname independently, leaving a DNS-rebinding/TOCTOU gap.
+      return opts.failOnResolutionError
+        ? { allowed: false, reason: 'hostname could not be resolved safely' }
+        : { allowed: true };
     }
-    if (addresses.length === 0) return { allowed: true };
+    if (addresses.length === 0) {
+      return opts.failOnResolutionError
+        ? { allowed: false, reason: 'hostname resolved to no addresses' }
+        : { allowed: true };
+    }
   }
 
   const blockPrivate = opts.blockPrivate ?? blockPrivateEnabled();
   for (const address of addresses) {
+    if (net.isIP(address) === 0) {
+      return { allowed: false, reason: 'hostname resolved to a malformed IP address' };
+    }
     const cls = classifyIp(address);
     if (cls === 'metadata') {
       return { allowed: false, reason: `resolves to a cloud metadata address (${address})` };
     }
     if (cls === 'link-local') {
       return { allowed: false, reason: `resolves to a link-local address (${address})` };
+    }
+    if (cls === 'reserved') {
+      return { allowed: false, reason: `resolves to a reserved or non-global address (${address})` };
     }
     if (blockPrivate && (cls === 'loopback' || cls === 'private')) {
       return {
@@ -249,7 +290,7 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
       };
     }
   }
-  return { allowed: true };
+  return { allowed: true, addresses: [...new Set(addresses)] };
 }
 
 /**
@@ -258,9 +299,20 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
  * (older install, direct DB edit, DNS change after save) still can't reach a
  * blocked address class.
  */
-export async function assertProviderUrlAllowed(rawUrl: string): Promise<void> {
-  const verdict = await assessProviderUrl(rawUrl);
+export async function assertProviderUrlAllowed(
+  rawUrl: string,
+  options: Omit<AssessOptions, 'failOnResolutionError'> = {},
+): Promise<string[]> {
+  // Request-time enforcement must always fail closed; options only allow tests
+  // and internal callers to provide a deterministic resolver. Return the exact
+  // vetted address set so the transport can pin its socket without resolving
+  // the hostname a second time.
+  const verdict = await assessProviderUrl(rawUrl, { ...options, failOnResolutionError: true });
   if (!verdict.allowed) {
     throw new Error(`Custom provider URL blocked: ${verdict.reason}`);
   }
+  if (!verdict.addresses?.length) {
+    throw new Error('Custom provider URL blocked: no vetted destination addresses available');
+  }
+  return verdict.addresses;
 }

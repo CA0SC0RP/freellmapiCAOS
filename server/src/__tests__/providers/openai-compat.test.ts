@@ -6,6 +6,7 @@ describe('OpenAICompatProvider', () => {
   let provider: OpenAICompatProvider;
 
   beforeEach(() => {
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
     provider = new OpenAICompatProvider({
       platform: 'groq',
       name: 'TestProvider',
@@ -74,7 +75,7 @@ describe('OpenAICompatProvider', () => {
     beforeEach(() => {
       // The custom-platform SSRF guard resolves public hosts before every
       // request; answer with a public address so no real DNS is needed.
-      vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '203.0.113.10', family: 4 }] as any);
+      vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
     });
     function captureBody(): { body: () => any } {
       let captured: any = null;
@@ -1281,6 +1282,10 @@ describe('pinned tool_choice retry on custom endpoints (#1548)', () => {
 });
 
 describe('OpenCode session header (#1639)', () => {
+  beforeEach(() => {
+    vi.spyOn(dns.promises, 'lookup').mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as any);
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
