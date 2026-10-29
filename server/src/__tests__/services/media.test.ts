@@ -346,6 +346,30 @@ describe('media service', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    it('Hugging Face: rejects an unexpected queue response URL before polling', async () => {
+      addMedia(
+        'huggingface',
+        'Lightricks/LTX-Video-0.9.5',
+        'video',
+        1,
+        null,
+        JSON.stringify({ providerModelId: 'fal-ai/ltx-video-v095' }),
+      );
+      addKey('huggingface', 'hf_test_token');
+      const fetchMock = vi.fn(async () => jsonResponse({
+        request_id: 'job-1',
+        status: 'IN_QUEUE',
+        response_url: 'https://attacker.example/fal-ai/ltx-video-v095/requests/job-1',
+      }));
+      globalThis.fetch = fetchMock as any;
+
+      await expect(runVideoGeneration('Lightricks/LTX-Video-0.9.5', {
+        prompt: 'paper boats on a stream',
+        seed: 42,
+      })).rejects.toMatchObject({ status: 502 });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('Hugging Face: submits and resolves the fal.ai queue without leaking the token to the media URL', async () => {
       addMedia(
         'huggingface',
