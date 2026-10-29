@@ -11,7 +11,7 @@ import type { ExtendedSamplingOptions } from '../lib/sampling-params.js';
 import { proxyFetch } from '../lib/proxy.js';
 import { providerTimeoutMs, streamStallTimeoutMs } from '../lib/provider-timeout.js';
 import { extractThinkTagsFromStream } from '../lib/think-tags.js';
-import { MAX_PROVIDER_STREAM_FRAME_BYTES, readProviderResponseJson } from './response-body.js';
+import { MAX_PROVIDER_STREAM_FRAME_BYTES, assertProviderStreamChunkWithinLimit, readProviderResponseJson } from './response-body.js';
 
 /** A provider HTTP error carrying the upstream status and, when the provider
  *  stated one, the parsed back-off so the router can bench the key for at least
@@ -513,10 +513,8 @@ export abstract class BaseProvider {
         // Reject oversized transport chunks before decoding/concatenating them.
         // This conservatively bounds transient string allocation as well as the
         // pending line buffer; compliant providers normally emit small SSE chunks.
-        if (value.byteLength > MAX_PROVIDER_STREAM_FRAME_BYTES ||
-            new TextEncoder().encode(buffer).byteLength + value.byteLength > MAX_PROVIDER_STREAM_FRAME_BYTES) {
-          throw new Error(`${this.name} stream frame exceeded the ${MAX_PROVIDER_STREAM_FRAME_BYTES}-byte limit`);
-        }
+        assertProviderStreamChunkWithinLimit(value);
+
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
