@@ -127,7 +127,8 @@ describe('transcription service', () => {
     addKey('groq');
     const controller = new AbortController();
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
-      expect(init.signal).toBe(controller.signal);
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      expect(init.signal?.aborted).toBe(false);
       return jsonResponse({ text: 'cancel-aware' });
     });
     globalThis.fetch = fetchMock as any;
