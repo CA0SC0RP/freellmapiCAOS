@@ -105,4 +105,58 @@ describe('provider streaming frame limits', () => {
     }));
     await expect(readProviderResponseBytes(response, 8)).rejects.toThrow(/exceeded.*byte limit/);
   });
+
+  it('preserves binary bytes across multiple chunks while buffering incrementally', async () => {
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        controller.enqueue(new Uint8Array([4, 5]));
+        controller.enqueue(new Uint8Array([6, 7, 8, 9]));
+        controller.close();
+      },
+    }));
+    await expect(readProviderResponseBytes(response, 16)).resolves.toEqual(
+      new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+    );
+  });
+
+  it('cancels and releases a binary stream when the byte limit is exceeded', async () => {
+    const cancel = vi.fn(async () => {});
+    const releaseLock = vi.fn();
+    let readCount = 0;
+    const responseLike = {
+      headers: { get: () => null },
+      body: {
+        getReader: () => ({
+          read: async () => readCount++ === 0
+            ? { done: false, value: new Uint8Array([1, 2, 3, 4, 5]) }
+            : { done: true },
+          cancel,
+          releaseLock,
+        }),
+      },
+    };
+    await expect(readProviderResponseBytes(responseLike, 4)).rejects.toThrow(/exceeded/);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(releaseLock).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe('provider response byte limit configuration', () => {
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid response byte limit %s',
+    async (limit) => {
+      const response = new Response('small');
+      await expect(readProviderResponseText(response, limit)).rejects.toThrow(/non-negative safe integer/);
+      await expect(readProviderResponseBytes(response, limit)).rejects.toThrow(/non-negative safe integer/);
+      expect(() => assertProviderStreamChunkWithinLimit(new Uint8Array(0), limit))
+        .toThrow(/non-negative safe integer/);
+    },
+  );
+
+  it('accepts a zero-byte limit only for an empty response', async () => {
+    await expect(readProviderResponseBytes(new Response(null), 0)).resolves.toEqual(new Uint8Array(0));
+    await expect(readProviderResponseText(new Response('x'), 0)).rejects.toThrow(/exceeded/);
+  });
 });

@@ -24,11 +24,19 @@ function isUint8ArrayView(value: unknown): value is Uint8Array {
   return ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === '[object Uint8Array]';
 }
 
+/** Reject invalid limits so NaN/Infinity cannot accidentally disable enforcement. */
+function assertValidByteLimit(maxBytes: number): void {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new RangeError('Provider response byte limit must be a non-negative safe integer');
+  }
+}
+
 /** Read a response body while enforcing a hard byte limit independent of Content-Length. */
 export async function readProviderResponseText(
   response: Response | ResponseBodyLike,
   maxBytes = MAX_PROVIDER_RESPONSE_BYTES,
 ): Promise<string> {
+  assertValidByteLimit(maxBytes);
   const res = response as ResponseBodyLike;
   const declaredHeader = res.headers?.get?.('content-length');
   const declared = declaredHeader == null || declaredHeader.trim() === '' ? NaN : Number(declaredHeader);
@@ -87,6 +95,7 @@ export async function readProviderResponseBytes(
   response: Response | ResponseBodyLike,
   maxBytes = MAX_PROVIDER_RESPONSE_BYTES,
 ): Promise<Uint8Array> {
+  assertValidByteLimit(maxBytes);
   const res = response as ResponseBodyLike;
   const declaredHeader = res.headers?.get?.('content-length');
   const declared = declaredHeader == null || declaredHeader.trim() === '' ? NaN : Number(declaredHeader);
@@ -101,16 +110,26 @@ export async function readProviderResponseBytes(
     throw new Error('Provider response has no readable stream; refusing an unbounded body read');
   }
 
-  const chunks: Uint8Array[] = [];
+  // Copy each chunk into a bounded growable buffer immediately. Keeping every
+  // chunk and then concatenating them doubles peak memory for large media
+  // responses; geometric growth bounds temporary duplication to one resize.
+  let bytes = new Uint8Array(Math.min(maxBytes, 16 * 1024));
   let total = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       if (!isUint8ArrayView(value)) throw new Error('Provider response stream returned an invalid chunk');
-      total += value.byteLength;
-      if (total > maxBytes) throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
-      chunks.push(value);
+      const nextTotal = total + value.byteLength;
+      if (nextTotal > maxBytes) throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
+      if (nextTotal > bytes.byteLength) {
+        const nextCapacity = Math.min(maxBytes, Math.max(nextTotal, Math.max(16 * 1024, bytes.byteLength * 2)));
+        const grown = new Uint8Array(nextCapacity);
+        grown.set(bytes.subarray(0, total));
+        bytes = grown;
+      }
+      bytes.set(value, total);
+      total = nextTotal;
     }
   } catch (error) {
     try { await reader.cancel(); } catch { /* already closed or cancelled */ }
@@ -119,13 +138,7 @@ export async function readProviderResponseBytes(
     reader.releaseLock();
   }
 
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
+  return bytes.subarray(0, total);
 }
 
 /** Parse bounded JSON from an upstream provider without unbounded json() fallback reads. */
@@ -144,6 +157,7 @@ export function assertProviderStreamChunkWithinLimit(
   chunk: Uint8Array,
   maxBytes = MAX_PROVIDER_STREAM_FRAME_BYTES,
 ): void {
+  assertValidByteLimit(maxBytes);
   if (!isUint8ArrayView(chunk)) {
     throw new Error('Provider stream returned an invalid chunk');
   }
