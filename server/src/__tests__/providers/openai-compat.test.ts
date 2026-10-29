@@ -27,7 +27,7 @@ describe('OpenAICompatProvider', () => {
         controller.close();
       },
     });
-    return { ok: true, body: stream, headers: new Headers() };
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
   }
 
   async function collect<T>(gen: AsyncGenerator<T>): Promise<T[]> {
@@ -842,7 +842,7 @@ describe('reasoning: request knob + <think> extraction (P2 #16)', () => {
         controller.close();
       },
     });
-    return { ok: true, body: stream, headers: new Headers() };
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
   }
 
   async function collect<T>(g: AsyncGenerator<T>): Promise<T[]> {
@@ -980,7 +980,7 @@ describe('OpenAICompatProvider in-band out-of-credits notice (#pollinations-inba
         controller.close();
       },
     });
-    return { ok: true, body: stream, headers: new Headers() };
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
   }
   const dataFrame = (delta: Record<string, unknown>, finish: string | null = null) =>
     `data: ${JSON.stringify({ id: 's1', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
@@ -1070,7 +1070,7 @@ describe('pinned tool_choice retry on custom endpoints (#1548)', () => {
         controller.close();
       },
     });
-    return { ok: true, status: 200, body, headers: new Headers() } as any;
+    return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) as any;
   };
 
   /** Answer each request with the next response and record every request body. */
