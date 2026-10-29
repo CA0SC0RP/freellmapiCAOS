@@ -1284,6 +1284,9 @@ proxyRouter.post('/audio/transcriptions', (req: Request, res: Response, next) =>
   const language = typeof req.body?.language === 'string' && req.body.language.trim() ? req.body.language.trim() : undefined;
   const prompt = typeof req.body?.prompt === 'string' && req.body.prompt ? req.body.prompt : undefined;
 
+  const clientAbort = new AbortController();
+  res.on('close', () => { if (!res.writableFinished) clientAbort.abort(); });
+
   try {
     const result = await runTranscription(model, {
       file: file.buffer,
@@ -1293,7 +1296,9 @@ proxyRouter.post('/audio/transcriptions', (req: Request, res: Response, next) =>
       prompt,
       temperature,
       responseFormat,
+      signal: clientAbort.signal,
     });
+    if (clientAbort.signal.aborted) return;
     res.setHeader('X-Provider', safeHeaderValue(result.platform));
     res.setHeader('X-Model', safeHeaderValue(result.modelId));
     if (responseFormat === 'text') {
@@ -1316,6 +1321,7 @@ proxyRouter.post('/audio/transcriptions', (req: Request, res: Response, next) =>
     }
     res.json({ text: result.text });
   } catch (err: any) {
+    if (clientAbort.signal.aborted) return;
     const status = err instanceof MediaError ? err.status : 502;
     const code = err instanceof MediaError ? inferenceBudgetCode(err, res) : {};
     const httpStatus = status >= 400 && status < 600 ? status : 502;
