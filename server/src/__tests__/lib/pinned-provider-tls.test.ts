@@ -10,10 +10,6 @@ const tlsFixtureAvailable = Boolean(certPath && keyPath);
 
 describe.skipIf(!tlsFixtureAvailable)('pinned custom-provider HTTPS/TLS', () => {
   const servers: Server[] = [];
-  const cert = readFileSync(certPath!, 'utf8');
-  const key = readFileSync(keyPath!, 'utf8');
-  const context = createSecureContext({ cert, key });
-
   afterEach(async () => {
     await Promise.all(servers.splice(0).map(async (server) => {
       if (!server.listening) return;
@@ -24,6 +20,9 @@ describe.skipIf(!tlsFixtureAvailable)('pinned custom-provider HTTPS/TLS', () => 
 
   async function startTlsServer(): Promise<{ server: Server; port: number; sniNames: string[] }> {
     const sniNames: string[] = [];
+    const cert = readFileSync(certPath!, 'utf8');
+    const key = readFileSync(keyPath!, 'utf8');
+    const context = createSecureContext({ cert, key });
     const server = createServer({
       cert,
       key,
