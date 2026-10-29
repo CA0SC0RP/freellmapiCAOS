@@ -771,7 +771,7 @@ describe('OpenAICompatProvider - platform instances', () => {
     });
 
     it('still throws when there is no failed_generation to rescue', async () => {
-      vi.spyOn(global, 'fetch').new Response(JSON.stringify({ error: { message: 'bad request', code: 'invalid_request' } }), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
+      vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: { message: 'bad request', code: 'invalid_request' } }), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
       await expect(
         provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'm', { tools }),
       ).rejects.toThrow(/API error 400/);
