@@ -1219,6 +1219,13 @@ describe('OpenCode session header (#1639)', () => {
     const encoder = new TextEncoder();
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       (global as any).__lastHeaders = (init as any).headers;
+      if (String(_url).includes('api.groq.com')) {
+        return new Response(JSON.stringify({
+          id: 'x', object: 'chat.completion', created: 1, model: 'm',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
+      }
       const stream = new ReadableStream<Uint8Array>({ start(c) { for (const f of frames) c.enqueue(encoder.encode(f)); c.close(); } });
       return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) as any;
     });
