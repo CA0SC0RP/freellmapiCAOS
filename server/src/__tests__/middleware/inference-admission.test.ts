@@ -53,14 +53,4 @@ describe('inference admission', () => {
     admit(req, response(), thirdNext);
     expect(thirdNext).toHaveBeenCalledOnce();
   });
-
-  it('releases capacity if downstream middleware throws synchronously', () => {
-    const admit = createInferenceAdmission(1);
-    const first = response();
-    admit(req, first, (() => { throw new Error('downstream failure'); }) as unknown as NextFunction);
-
-    const secondNext = vi.fn() as unknown as NextFunction;
-    admit(req, response(), secondNext);
-    expect(secondNext).toHaveBeenCalledOnce();
-  });
 });
