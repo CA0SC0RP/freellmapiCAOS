@@ -19,6 +19,7 @@ import { proxyFetch } from '../lib/proxy.js';
 import { checkMonthlyBudget, secondsUntilNextMonth } from './key-budget.js';
 import { noteBudgetAlerts } from './budget-alerts.js';
 import { markKeyHealthyFromRequest } from './health.js';
+import { readProviderResponseJson, readProviderResponseText } from '../providers/response-body.js';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -140,11 +141,11 @@ async function callProvider(
   }, row.platform, 'moderation');
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
+    const body = await readProviderResponseText(res).catch(() => '');
     throw new ModerationError(`moderation provider ${row.platform} returned ${res.status}: ${body.slice(0, 200)}`, res.status);
   }
 
-  const json = await res.json() as Record<string, unknown>;
+  const json = await readProviderResponseJson(res) as Record<string, unknown>;
   if (!json.results || !Array.isArray(json.results)) {
     throw new ModerationError('upstream returned malformed moderation response', 502);
   }
