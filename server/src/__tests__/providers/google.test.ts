@@ -113,7 +113,7 @@ describe('GoogleProvider', () => {
   // #268: Google reports a bad key as HTTP 400 INVALID_ARGUMENT / API_KEY_INVALID,
   // not 401/403. A confirmed-bad key must return false (→ auto-disable counter).
   it('validateKey returns false for a genuinely invalid key (HTTP 400 API_KEY_INVALID)', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         error: {
           code: 400,
           message: 'API key not valid. Please pass a valid API key.',
@@ -129,7 +129,7 @@ describe('GoogleProvider', () => {
   // may still work for generateContent elsewhere — validateKey throws so health.ts
   // records status='error' instead of incrementing the disable counter.
   it('validateKey throws (does not return false) on a permission/region 403', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         error: {
           code: 403,
           message: 'Generative Language API has not been used in project before or it is disabled.',
@@ -327,7 +327,7 @@ describe('GoogleProvider', () => {
   });
 
   it('does not expose Gemini thought parts as visible content (#539)', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         candidates: [{
           content: {
             parts: [
@@ -439,7 +439,7 @@ describe('GoogleProvider', () => {
   });
 
   it('should translate Gemini functionCall response to OpenAI tool_calls', async () => {
-    vi.spyOn(global, 'fetch').new Response(JSON.stringify({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         candidates: [{
           content: {
             parts: [{
