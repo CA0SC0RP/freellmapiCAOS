@@ -41,6 +41,9 @@ jobs:
           openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TLS_DIR/key.pem" -out "$TLS_DIR/cert.pem" -days 2 -subj "/CN=provider.test" -addext "subjectAltName=DNS:provider.test" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign" -addext "extendedKeyUsage=serverAuth"
           echo "PINNED_PROVIDER_TEST_CERT=$TLS_DIR/cert.pem" >> "$GITHUB_ENV"
           echo "PINNED_PROVIDER_TEST_KEY=$TLS_DIR/key.pem" >> "$GITHUB_ENV"
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TLS_DIR/untrusted-key.pem" -out "$TLS_DIR/untrusted-cert.pem" -days 2 -subj "/CN=provider.test" -addext "subjectAltName=DNS:provider.test" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign" -addext "extendedKeyUsage=serverAuth"
+          echo "PINNED_PROVIDER_UNTRUSTED_TEST_CERT=$TLS_DIR/untrusted-cert.pem" >> "$GITHUB_ENV"
+          echo "PINNED_PROVIDER_UNTRUSTED_TEST_KEY=$TLS_DIR/untrusted-key.pem" >> "$GITHUB_ENV"
           echo "NODE_EXTRA_CA_CERTS=$TLS_DIR/cert.pem" >> "$GITHUB_ENV"
 
       - name: Check migration round trip
