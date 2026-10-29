@@ -138,7 +138,7 @@ describe('CloudflareProvider', () => {
       vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
         calls.push(url as string);
         if ((url as string).includes('/user/tokens/verify')) {
-          return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
+          return new Response(JSON.stringify({}), { status: 403, headers: { 'Content-Type': 'application/json' } }) as any;
         }
         return new Response(JSON.stringify({ success: true, result: { status: 'active' } }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       });
@@ -150,7 +150,7 @@ describe('CloudflareProvider', () => {
 
     it('fails with the upstream reason when both scopes reject the token', async () => {
       vi.spyOn(global, 'fetch').mockImplementation(async () => {
-        return new Response(JSON.stringify({ success: false, errors: [{ code: 9109, message: 'Invalid access token' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
+        return new Response(JSON.stringify({ success: false, errors: [{ code: 9109, message: 'Invalid access token' }] }), { status: 403, statusText: 'Forbidden', headers: { 'Content-Type': 'application/json' } }) as any;
       });
 
       const result = await provider.validateKey('acc123:tok');
@@ -162,7 +162,7 @@ describe('CloudflareProvider', () => {
     it('fails with the token status when the account scope reports an inactive token', async () => {
       vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
         if ((url as string).includes('/user/tokens/verify')) {
-          return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
+          return new Response(JSON.stringify({}), { status: 403, headers: { 'Content-Type': 'application/json' } }) as any;
         }
         return new Response(JSON.stringify({ success: true, result: { status: 'disabled' } }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       });
