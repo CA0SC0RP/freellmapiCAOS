@@ -52,7 +52,7 @@ export async function readProviderResponseText(res: Response, maxBytes = MAX_PRO
 
 /** Parse bounded JSON from an upstream provider. */
 export async function readProviderResponseJson<T = unknown>(res: Response, maxBytes = MAX_PROVIDER_RESPONSE_BYTES): Promise<T> {
-  if (!res.body && typeof (res as any).json === 'function') {
+  if (!(res instanceof Response) && typeof (res as any).json === 'function') {
     // Compatibility for Response-like test doubles with a json() method but
     // no stream body. Native Fetch Responses use the bounded stream path above.
     const value = await (res as any).json();
