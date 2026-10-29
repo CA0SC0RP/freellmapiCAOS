@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { initDb, getDb } from '../../db/index.js';
 import { encrypt } from '../../lib/crypto.js';
-import { runImageGeneration, runVideoGeneration, runSpeech } from '../../services/media.js';
+import { runImageGeneration, runVideoGeneration, runSpeech, acquireTranscriptionUploadSlot } from '../../services/media.js';
 
 const realFetch = globalThis.fetch;
 
@@ -51,6 +51,23 @@ describe('media service', () => {
     vi.restoreAllMocks();
   });
 
+  it('bounds transcription upload buffers before parsing begins', () => {
+    const previousLimit = process.env.MEDIA_MAX_CONCURRENT_TRANSCRIPTION_UPLOADS;
+    process.env.MEDIA_MAX_CONCURRENT_TRANSCRIPTION_UPLOADS = '1';
+    try {
+      const releaseFirst = acquireTranscriptionUploadSlot();
+      expect(releaseFirst).toBeTypeOf('function');
+      expect(acquireTranscriptionUploadSlot()).toBeNull();
+      releaseFirst?.();
+      const releaseSecond = acquireTranscriptionUploadSlot();
+      expect(releaseSecond).toBeTypeOf('function');
+      releaseSecond?.();
+    } finally {
+      if (previousLimit === undefined) delete process.env.MEDIA_MAX_CONCURRENT_TRANSCRIPTION_UPLOADS;
+      else process.env.MEDIA_MAX_CONCURRENT_TRANSCRIPTION_UPLOADS = previousLimit;
+    }
+  });
+
   it('migration creates the media_models table', () => {
     const cols = (getDb().prepare('PRAGMA table_info(media_models)').all() as { name: string }[]).map(c => c.name);
     expect(cols).toContain('modality');
@@ -88,6 +105,36 @@ describe('media service', () => {
   });
 
   describe('image generation', () => {
+
+    it('rejects excess concurrent media work and releases capacity after completion', async () => {
+      twoImageProviders();
+      const previousLimit = process.env.MEDIA_MAX_CONCURRENT;
+      process.env.MEDIA_MAX_CONCURRENT = '1';
+      let finish!: (response: Response) => void;
+      const fetchMock = vi.fn()
+        .mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+        .mockResolvedValue(jsonResponse({ artifacts: [{ base64: 'AAAA' }] }));
+      globalThis.fetch = fetchMock as any;
+
+      try {
+        const first = runImageGeneration('auto', { prompt: 'first image' });
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+        await expect(runImageGeneration('auto', { prompt: 'second image' }))
+          .rejects.toMatchObject({ status: 503, code: 'media_concurrency_limit', retryAfterMs: 1000 });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        finish(jsonResponse({ artifacts: [{ base64: 'AAAA' }] }));
+        await expect(first).resolves.toMatchObject({ platform: 'nvidia' });
+
+        await expect(runImageGeneration('auto', { prompt: 'third image' }))
+          .resolves.toMatchObject({ platform: 'nvidia' });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        if (previousLimit === undefined) delete process.env.MEDIA_MAX_CONCURRENT;
+        else process.env.MEDIA_MAX_CONCURRENT = previousLimit;
+      }
+    });
+
     it('aborts image generation on client disconnect without failing over', async () => {
       twoImageProviders();
       const controller = new AbortController();
