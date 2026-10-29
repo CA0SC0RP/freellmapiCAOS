@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm';
 import { describe, it, expect, vi } from 'vitest';
 import { readProviderResponseText, readProviderResponseJson, MAX_PROVIDER_RESPONSE_BYTES, MAX_PROVIDER_STREAM_FRAME_BYTES, assertProviderStreamChunkWithinLimit } from '../../providers/response-body.js';
 
@@ -26,6 +27,44 @@ describe('provider response body size limits', () => {
       text: async () => { throw new Error('text fallback must not be used'); },
     };
     await expect(readProviderResponseText(responseLike)).rejects.toThrow(/exceeded/);
+  });
+
+  it('cancels the reader when a stream yields an invalid chunk', async () => {
+    const cancel = vi.fn(async () => {});
+    const releaseLock = vi.fn();
+    const responseLike = {
+      body: {
+        getReader: () => ({
+          read: async () => ({ done: false, value: { not: 'a byte array' } as unknown as Uint8Array }),
+          cancel,
+          releaseLock,
+        }),
+      },
+    };
+    await expect(readProviderResponseText(responseLike)).rejects.toThrow(/invalid chunk/);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('accepts Uint8Array chunks created in another JavaScript realm', async () => {
+    const crossRealmBytes = runInNewContext('new Uint8Array([111, 107])') as Uint8Array;
+    expect(crossRealmBytes).not.toBeInstanceOf(Uint8Array);
+    const responseLike = {
+      body: {
+        getReader: () => {
+          let read = false;
+          return {
+            read: async () => read
+              ? { done: true }
+              : (read = true, { done: false, value: crossRealmBytes }),
+            cancel: async () => {},
+            releaseLock: () => {},
+          };
+        },
+      },
+    };
+    await expect(readProviderResponseText(responseLike)).resolves.toBe('ok');
+    expect(() => assertProviderStreamChunkWithinLimit(crossRealmBytes)).not.toThrow();
   });
 
   it('rejects adapters without a readable stream before calling unbounded text/json methods', async () => {
