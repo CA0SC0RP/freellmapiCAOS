@@ -373,9 +373,9 @@ describe('media service', () => {
         }
         if (url === statusUrl) return jsonResponse({ status: 'COMPLETED' });
         if (url === jobUrl) {
-          return jsonResponse({ video: { url: 'https://cdn.example.test/video.mp4', content_type: 'video/mp4' } });
+          return jsonResponse({ video: { url: 'https://8.8.8.8/video.mp4', content_type: 'video/mp4' } });
         }
-        if (url === 'https://cdn.example.test/video.mp4') {
+        if (url === 'https://8.8.8.8/video.mp4') {
           return new Response(Buffer.from('HFVIDEO'), { status: 200, headers: { 'content-type': 'video/mp4' } });
         }
         throw new Error(`unexpected fetch: ${url}`);
@@ -392,7 +392,7 @@ describe('media service', () => {
         submitUrl,
         statusUrl,
         jobUrl,
-        'https://cdn.example.test/video.mp4',
+        'https://8.8.8.8/video.mp4',
       ]);
       expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({
         prompt: 'paper boats on a stream',
@@ -454,7 +454,7 @@ describe('media service', () => {
       const fetchMock = vi.fn(async (input: string | URL | Request) => {
         const url = String(input);
         if (url.includes('requests/job-1?_subdomain=queue')) {
-          return jsonResponse({ video: { url: 'http://169.254.169.254/latest/meta-data/' } });
+          return jsonResponse({ video: { url: 'https://169.254.169.254/latest/meta-data/' } });
         }
         return jsonResponse({
           request_id: 'job-1',
@@ -465,7 +465,7 @@ describe('media service', () => {
       globalThis.fetch = fetchMock as any;
 
       await expect(runVideoGeneration('Lightricks/LTX-Video-0.9.5', { prompt: 'x' }))
-        .rejects.toThrow(/unusable video URL/);
+        .rejects.toThrow(/private address/);
       // Submit + result read only; the metadata address was never contacted.
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
