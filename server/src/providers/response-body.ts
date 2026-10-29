@@ -24,11 +24,19 @@ function isUint8ArrayView(value: unknown): value is Uint8Array {
   return ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === '[object Uint8Array]';
 }
 
+/** Reject invalid limits so NaN/Infinity cannot accidentally disable enforcement. */
+function assertValidByteLimit(maxBytes: number): void {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new RangeError('Provider response byte limit must be a non-negative safe integer');
+  }
+}
+
 /** Read a response body while enforcing a hard byte limit independent of Content-Length. */
 export async function readProviderResponseText(
   response: Response | ResponseBodyLike,
   maxBytes = MAX_PROVIDER_RESPONSE_BYTES,
 ): Promise<string> {
+  assertValidByteLimit(maxBytes);
   const res = response as ResponseBodyLike;
   const declaredHeader = res.headers?.get?.('content-length');
   const declared = declaredHeader == null || declaredHeader.trim() === '' ? NaN : Number(declaredHeader);
@@ -87,6 +95,7 @@ export async function readProviderResponseBytes(
   response: Response | ResponseBodyLike,
   maxBytes = MAX_PROVIDER_RESPONSE_BYTES,
 ): Promise<Uint8Array> {
+  assertValidByteLimit(maxBytes);
   const res = response as ResponseBodyLike;
   const declaredHeader = res.headers?.get?.('content-length');
   const declared = declaredHeader == null || declaredHeader.trim() === '' ? NaN : Number(declaredHeader);
@@ -144,6 +153,7 @@ export function assertProviderStreamChunkWithinLimit(
   chunk: Uint8Array,
   maxBytes = MAX_PROVIDER_STREAM_FRAME_BYTES,
 ): void {
+  assertValidByteLimit(maxBytes);
   if (!isUint8ArrayView(chunk)) {
     throw new Error('Provider stream returned an invalid chunk');
   }
