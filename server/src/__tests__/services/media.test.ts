@@ -88,6 +88,22 @@ describe('media service', () => {
   });
 
   describe('image generation', () => {
+    it('aborts image generation on client disconnect without failing over', async () => {
+      twoImageProviders();
+      const controller = new AbortController();
+      const fetchMock = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      }));
+      globalThis.fetch = fetchMock as any;
+      const pending = runImageGeneration('auto', { prompt: 'a cat', signal: controller.signal });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ status: 499, message: 'client closed the request' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     function twoImageProviders() {
       addMedia('nvidia', 'black-forest-labs/flux.1-schnell', 'image', 1);
       addMedia('siliconflow', 'black-forest-labs/FLUX.1-schnell', 'image', 2);
@@ -758,4 +774,26 @@ describe('media service', () => {
       expect(log.key_id).toBe(keyId);
     });
   });
+
+  describe('speech cancellation', () => {
+    it('aborts speech generation on client disconnect without failing over', async () => {
+      addMedia('speechify', 'simba-english', 'audio', 1);
+      addMedia('electronhub', 'gemini-2.5-flash-preview-tts', 'audio', 2);
+      addKey('speechify');
+      addKey('electronhub');
+      const controller = new AbortController();
+      const fetchMock = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      }));
+      globalThis.fetch = fetchMock as any;
+      const pending = runSpeech('auto', { input: 'hello', signal: controller.signal });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ status: 499, message: 'client closed the request' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
 });
