@@ -57,8 +57,7 @@ function sseResponseNoUsage(text = 'hi') {
         for (const f of frames) controller.enqueue(encoder.encode(f));
         controller.close();
       },
-    }),
-  }, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
 /** SSE Response whose final frame carries an upstream usage block. */
@@ -75,8 +74,7 @@ function sseResponseWithUsage() {
         for (const f of frames) controller.enqueue(encoder.encode(f));
         controller.close();
       },
-    }),
-  }, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
 /** SSE Response with usage-only frame emitted MID-STREAM (before the finish chunk). */
@@ -94,8 +92,7 @@ function sseResponseUsageMidStream() {
         for (const f of frames) controller.enqueue(encoder.encode(f));
         controller.close();
       },
-    }),
-  }, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
 /** SSE Response with usage attached to a CONTENT frame (non-final position). */
@@ -111,8 +108,7 @@ function sseResponseUsageOnContentFrame() {
         for (const f of frames) controller.enqueue(encoder.encode(f));
         controller.close();
       },
-    }),
-  }, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
 function usageFrames(raw: string) {
