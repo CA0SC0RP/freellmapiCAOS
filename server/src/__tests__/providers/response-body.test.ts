@@ -119,6 +119,27 @@ describe('provider streaming frame limits', () => {
       new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
     );
   });
+
+  it('cancels and releases a binary stream when the byte limit is exceeded', async () => {
+    const cancel = vi.fn(async () => {});
+    const releaseLock = vi.fn();
+    let readCount = 0;
+    const responseLike = {
+      headers: { get: () => null },
+      body: {
+        getReader: () => ({
+          read: async () => readCount++ === 0
+            ? { done: false, value: new Uint8Array([1, 2, 3, 4, 5]) }
+            : { done: true },
+          cancel,
+          releaseLock,
+        }),
+      },
+    };
+    await expect(readProviderResponseBytes(responseLike, 4)).rejects.toThrow(/exceeded/);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(releaseLock).toHaveBeenCalledOnce();
+  });
 });
 
 
