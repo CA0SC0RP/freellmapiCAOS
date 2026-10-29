@@ -70,16 +70,11 @@ describe('Provider error redaction', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
-        return {
-          ok: false,
-          status: 401,
-          statusText: 'Unauthorized',
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             error: {
               message: `Invalid Bearer ${leakedKey} for ${leakedUrl}`,
             },
-          }),
-        } as any;
+          }), { status: 401, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -109,17 +104,11 @@ describe('Provider error redaction', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
-        return {
-          ok: false,
-          status: 400,
-          statusText: 'Bad Request',
-          headers: new Headers(),
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             error: {
               message: 'tool schema not supported',
             },
-          }),
-        } as any;
+          }), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });

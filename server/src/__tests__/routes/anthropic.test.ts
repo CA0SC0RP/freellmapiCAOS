@@ -79,7 +79,7 @@ function mockJson(response: any) {
     const urlStr = typeof url === 'string' ? url : url.toString();
     if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
       captured.body = JSON.parse(String((init as RequestInit).body));
-      return { ok: true, json: () => Promise.resolve(response) } as any;
+      return new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     return origFetch(url as any, init);
   });
@@ -95,7 +95,7 @@ function mockGoogleJsonSequence(responses: any[]) {
       capturedBodies.push(JSON.parse(String((init as RequestInit).body)));
       const response = responses.shift();
       if (!response) throw new Error('No mocked Google response left');
-      return { ok: true, json: () => Promise.resolve(response) } as any;
+      return new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     return origFetch(url as any, init);
   });

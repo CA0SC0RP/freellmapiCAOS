@@ -63,10 +63,7 @@ describe('revocable URL-token aliases', () => {
     const originalFetch = global.fetch;
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       if (String(url).includes('api.groq.com/openai/v1/chat/completions')) {
-        return {
-          ok: true,
-          headers: new Headers(),
-          json: async () => ({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-url-token',
             object: 'chat.completion',
             created: 1,
@@ -77,8 +74,7 @@ describe('revocable URL-token aliases', () => {
               finish_reason: 'stop',
             }],
             usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       return originalFetch(url, init);
     });

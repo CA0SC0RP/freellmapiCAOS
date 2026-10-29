@@ -9,26 +9,19 @@ afterEach(() => {
 });
 
 /** Minimal catalog/chat responses. status alone decides the validation verdict. */
-const catalogRes = (status: number, message?: string) => ({
-  ok: status < 400,
+const catalogRes = (status: number, message?: string) => new Response(JSON.stringify(
+  status === 401 ? { error: { message: message ?? 'invalid api key' } } : { data: [] },
+), {
   status,
   statusText: status === 401 ? 'Unauthorized' : 'OK',
-  headers: new Headers(),
-  json: () => Promise.resolve(
-    status === 401 ? { error: { message: message ?? 'invalid api key' } } : { data: [] },
-  ),
+  headers: { 'Content-Type': 'application/json' },
 }) as unknown as Response;
 
-const chatRes = () => ({
-  ok: true,
-  status: 200,
-  headers: new Headers(),
-  json: () => Promise.resolve({
-    id: 'id', object: 'chat.completion', created: 1, model: 'glm-4.5-flash',
-    choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-  }),
-}) as unknown as Response;
+const chatRes = () => new Response(JSON.stringify({
+  id: 'id', object: 'chat.completion', created: 1, model: 'glm-4.5-flash',
+  choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+  usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+}), { status: 200, headers: { 'Content-Type': 'application/json' } }) as unknown as Response;
 
 /** Record every URL fetched and answer from a per-host table. */
 function mockHosts(table: Array<[string, () => Response]>) {

@@ -11,23 +11,16 @@ const VALID_KEY = 'sk_test_valid';
 const ACCOUNT_KEY_URL = 'https://gen.pollinations.ai/account/key';
 
 // Verified live 2026-07-28: GET /v1/models answers 200 for a garbage bearer.
-const PUBLIC_MODELS_200 = {
-  ok: true,
-  status: 200,
-  json: () => Promise.resolve({ object: 'list', data: [{ id: 'openai-fast', object: 'model' }] }),
-};
+const PUBLIC_MODELS_200 = () => new Response(JSON.stringify({
+  object: 'list', data: [{ id: 'openai-fast', object: 'model' }],
+}), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
-// Verified live 2026-07-28 against /account/key with a garbage bearer.
-const ACCOUNT_KEY_401 = {
-  ok: false,
+// /account/key rejects an invalid bearer with a structured 401 response.
+const ACCOUNT_KEY_401 = () => new Response(JSON.stringify({
+  success: false,
+  error: { message: 'API key required. This endpoint validates API keys.', code: 'UNAUTHORIZED' },
   status: 401,
-  statusText: 'Unauthorized',
-  json: () => Promise.resolve({
-    success: false,
-    error: { message: 'API key required. This endpoint validates API keys.', code: 'UNAUTHORIZED' },
-    status: 401,
-  }),
-};
+}), { status: 401, statusText: 'Unauthorized', headers: { 'Content-Type': 'application/json' } });
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -52,8 +45,8 @@ describe('Pollinations validateKey (#608)', () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       calls.push({ url: String(url), init: init as RequestInit });
-      if (String(url).endsWith('/v1/models')) return PUBLIC_MODELS_200 as unknown as Response;
-      return ACCOUNT_KEY_401 as unknown as Response;
+      if (String(url).endsWith('/v1/models')) return PUBLIC_MODELS_200();
+      return ACCOUNT_KEY_401();
     });
 
     const provider = new PollinationsProvider();

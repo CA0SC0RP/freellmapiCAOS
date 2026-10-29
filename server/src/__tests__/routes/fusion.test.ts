@@ -62,11 +62,7 @@ function mockUpstreams(answers: Record<string, MockAnswer>, rateLimited: Set<str
     calls.push({ url: u, body });
     for (const host of rateLimited) {
       if (u.includes(host)) {
-        return {
-          ok: false, status: 429, headers: new Headers(),
-          text: () => Promise.resolve('rate limited'),
-          json: () => Promise.resolve({ error: { message: 'rate limited' } }),
-        } as any;
+        return new Response(JSON.stringify({ error: { message: 'rate limited' } }), { status: 429, headers: { 'Content-Type': 'application/json' } });
       }
     }
     // Streaming (judge) hosts return an SSE body consumed by streamChatCompletion.
@@ -87,16 +83,13 @@ function mockUpstreams(answers: Record<string, MockAnswer>, rateLimited: Set<str
         const finishReason = typeof content === 'string'
           ? 'stop'
           : content.finish_reason ?? (content.tool_calls?.length ? 'tool_calls' : 'stop');
-        return {
-          ok: true,
-          json: () => Promise.resolve({
-            id: 'chatcmpl-x', object: 'chat.completion', created: 1, model: 'm',
-            choices: [{ index: 0, message, finish_reason: finishReason }],
-            usage: typeof content === 'string'
-              ? { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 }
-              : content.usage ?? { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 },
-          }),
-        } as any;
+        return new Response(JSON.stringify({
+          id: 'chatcmpl-x', object: 'chat.completion', created: 1, model: 'm',
+          choices: [{ index: 0, message, finish_reason: finishReason }],
+          usage: typeof content === 'string'
+            ? { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 }
+            : content.usage ?? { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
     return origFetch(url as any, init as any);
@@ -115,23 +108,16 @@ function mockUpstreamErrors(errors: Record<string, { status: number; message: st
     for (const [host, e] of Object.entries(errors)) {
       if (u.includes(host)) {
         const body = { error: { message: e.message } };
-        return {
-          ok: false, status: e.status, statusText: 'error', headers: new Headers(),
-          text: () => Promise.resolve(JSON.stringify(body)),
-          json: () => Promise.resolve(body),
-        } as any;
+        return new Response(JSON.stringify(body), { status: e.status, statusText: 'error', headers: { 'Content-Type': 'application/json' } });
       }
     }
     for (const [host, content] of Object.entries(answers)) {
       if (u.includes(host)) {
-        return {
-          ok: true, status: 200, headers: new Headers(),
-          json: () => Promise.resolve({
-            id: 'chatcmpl-x', object: 'chat.completion', created: 1, model: 'm',
-            choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
-            usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 },
-          }),
-        } as any;
+        return new Response(JSON.stringify({
+          id: 'chatcmpl-x', object: 'chat.completion', created: 1, model: 'm',
+          choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
     return origFetch(url as any, init as any);
@@ -644,15 +630,11 @@ describe('fusion route (/v1/chat/completions, model: "fusion")', () => {
         }) as any;
       }
       if (u.includes('api.cerebras.ai')) {
-        return {
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-timeout-fallback', object: 'chat.completion', created: 1, model: 'm',
             choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: toolCalls }, finish_reason: 'tool_calls' }],
             usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url as any, init as any);
     });

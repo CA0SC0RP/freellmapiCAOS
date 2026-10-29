@@ -4,6 +4,13 @@ import { initDb, getDb } from '../../db/index.js';
 import { resolveProvider } from '../../providers/index.js';
 
 // #1403 phase 1: quota_api observations from a provider key-info endpoint.
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 beforeAll(() => {
   process.env.ENCRYPTION_KEY = '0'.repeat(64);
   initDb(':memory:');
@@ -34,13 +41,9 @@ describe('fetchQuota — provider-reported quota polling (#1403)', () => {
   });
 
   it('records limit/remaining from the data-wrapped key-info body as source=quota_api', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: { label: 'sk-or-...', limit: 10, limit_remaining: 7.25, usage: 2.75 },
-      }),
-    } as any);
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(jsonResponse({
+      data: { label: 'sk-or-...', limit: 10, limit_remaining: 7.25, usage: 2.75 },
+    }));
 
     const provider = makeProvider({
       url: 'https://openrouter.ai/api/v1/key',
@@ -64,9 +67,7 @@ describe('fetchQuota — provider-reported quota polling (#1403)', () => {
   });
 
   it('falls back to the top-level body when there is no data wrapper', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true, status: 200, json: async () => ({ limit: 100, remaining: 40 }),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValue(jsonResponse({ limit: 100, remaining: 40 }));
     const provider = makeProvider({
       url: 'https://example.test/quota', metric: 'credits',
       limitFields: ['limit'], remainingFields: ['remaining'],
@@ -99,9 +100,9 @@ describe('fetchQuota — provider-reported quota polling (#1403)', () => {
   });
 
   it('a body with no numeric limit/remaining records nothing', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true, status: 200, json: async () => ({ data: { label: 'key', limit: null, limit_remaining: null } }),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValue(jsonResponse({
+      data: { label: 'key', limit: null, limit_remaining: null },
+    }));
     const provider = makeProvider({
       url: 'https://openrouter.ai/api/v1/key', metric: 'credits',
       limitFields: ['limit'], remainingFields: ['limit_remaining'],
@@ -113,9 +114,7 @@ describe('fetchQuota — provider-reported quota polling (#1403)', () => {
   it('the registered OpenRouter provider carries the /api/v1/key probe', async () => {
     const provider = resolveProvider('openrouter');
     expect(provider).toBeDefined();
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true, status: 200, json: async () => ({ data: { limit: 5, limit_remaining: 4.99 } }),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValue(jsonResponse({ data: { limit: 5, limit_remaining: 4.99 } }));
     getDb().prepare('DELETE FROM provider_quota_state').run();
     const ok = await provider!.fetchQuota('sk-or-x', { platform: 'openrouter', keyId: 7 });
     expect(ok).toBe(true);
@@ -123,10 +122,9 @@ describe('fetchQuota — provider-reported quota polling (#1403)', () => {
   });
 
   it('accepts string-encoded balances (SiliconFlow returns "88.88")', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true, status: 200,
-      json: async () => ({ code: 200, data: { id: 'u', balance: '7.3972', chargeBalance: '15.2505', totalBalance: '22.6478', status: 'normal' } }),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValue(jsonResponse({
+      code: 200, data: { id: 'u', balance: '7.3972', chargeBalance: '15.2505', totalBalance: '22.6478', status: 'normal' },
+    }));
     const provider = makeProvider({
       url: 'https://api.siliconflow.com/v1/user/info', metric: 'credits',
       limitFields: [], remainingFields: ['totalBalance', 'balance'],
@@ -139,10 +137,7 @@ describe('fetchQuota — provider-reported quota polling (#1403)', () => {
   });
 
   it('a non-numeric string is not a balance', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true, status: 200,
-      json: async () => ({ data: { totalBalance: '', balance: null } }),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValue(jsonResponse({ data: { totalBalance: '', balance: null } }));
     const provider = makeProvider({
       url: 'https://api.siliconflow.com/v1/user/info', metric: 'credits',
       limitFields: [], remainingFields: ['totalBalance', 'balance'],
@@ -154,9 +149,7 @@ describe('fetchQuota — provider-reported quota polling (#1403)', () => {
   it('the registered SiliconFlow provider carries the /v1/user/info probe', async () => {
     const provider = resolveProvider('siliconflow');
     expect(provider).toBeDefined();
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true, status: 200, json: async () => ({ data: { balance: '0.88', totalBalance: '0.88' } }),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValue(jsonResponse({ data: { balance: '0.88', totalBalance: '0.88' } }));
     getDb().prepare('DELETE FROM provider_quota_state').run();
     const ok = await provider!.fetchQuota('sk-sf', { platform: 'siliconflow', keyId: 9 });
     expect(ok).toBe(true);

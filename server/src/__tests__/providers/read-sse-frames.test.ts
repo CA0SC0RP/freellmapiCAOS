@@ -3,6 +3,7 @@ import { OpenAICompatProvider } from '../../providers/openai-compat.js';
 import { resetTimeoutWarnings } from '../../lib/provider-timeout.js';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import type { ChatCompletionChunk } from '@freellmapi/shared/types.js';
+import { MAX_PROVIDER_STREAM_FRAME_BYTES } from '../../providers/response-body.js';
 
 const MESSAGES: ChatMessage[] = [{ role: 'user', content: 'hi' }];
 
@@ -97,6 +98,34 @@ describe('readSseFrames data: prefix (issue #1087)', () => {
     const chunks = await collect(provider.streamChatCompletion('k', MESSAGES, 'm'));
     expect(chunks.map(c => c.choices?.[0]?.delta?.content ?? '')).toContain('hello');
     expect(chunks.some(c => c.choices?.[0]?.finish_reason === 'stop')).toBe(true);
+  });
+
+  it('rejects an oversized upstream SSE chunk before parsing it', async () => {
+    const body = `data: ${'x'.repeat(MAX_PROVIDER_STREAM_FRAME_BYTES + 1)}`;
+    const provider = makeProvider();
+    vi.spyOn(global, 'fetch').mockResolvedValue(sseResponse(body));
+
+    await expect(collect(provider.streamChatCompletion('k', MESSAGES, 'm'))).rejects.toThrow(/exceeded/);
+  });
+
+  it('rejects a frame that exceeds the cap across multiple small transport chunks', async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        // Each chunk is below the transport cap, but the unterminated SSE line
+        // grows past the frame cap when the chunks are accumulated.
+        for (let i = 0; i < 4; i++) controller.enqueue(encoder.encode('x'.repeat(600_000)));
+        controller.close();
+      },
+    });
+    const provider = makeProvider();
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }));
+
+    await expect(collect(provider.streamChatCompletion('k', MESSAGES, 'm')))
+      .rejects.toThrow(/stream frame exceeded/);
   });
 
   it('throws when the stream ends without [DONE] or finish_reason', async () => {

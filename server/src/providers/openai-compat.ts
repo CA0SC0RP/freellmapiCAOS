@@ -6,6 +6,7 @@ import type {
   Platform,
 } from '@freellmapi/shared/types.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
+import { readProviderResponseJson, readProviderResponseText } from './response-body.js';
 import { extendedBodyParams, resolveMaxTokens } from '../lib/sampling-params.js';
 import { rescueInlineToolCalls } from '../lib/tool-call-rescue.js';
 import { extractThinkFromMessage } from '../lib/think-tags.js';
@@ -391,7 +392,7 @@ export class OpenAICompatProvider extends BaseProvider {
         ...extendedBodyParams(this.platform, options),
       }),
       // 'request' bounds: the deadline covers the body read too, so a 200
-      // whose body hangs aborts instead of stalling res.json() forever.
+      // whose body hangs aborts instead of stalling readProviderResponseJson(res) forever.
     }, options?.timeoutMs ?? this.timeoutMs, { signal: options?.signal, timeoutBounds: 'request' });
 
     recordQuotaObservationsFromResponse(res, {
@@ -404,7 +405,7 @@ export class OpenAICompatProvider extends BaseProvider {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
+      const err = await readProviderResponseJson(res).catch(() => ({}));
       const rescued = this.rescueFailedGeneration(err, options);
       if (rescued) {
         console.log(`[${this.name}] Rescued ${rescued.length} inline tool call(s) from a ${res.status} tool_use_failed (#264)`);
@@ -426,8 +427,13 @@ export class OpenAICompatProvider extends BaseProvider {
 
     let data: ChatCompletionResponse;
     let parseErr: unknown;
+    let responseText = '';
     try {
-      data = await res.json() as ChatCompletionResponse;
+      // Read through the bounded stream helper first, then parse locally. This
+      // preserves the response-size guard while retaining the raw bytes needed
+      // to distinguish NDJSON's second document from mid-token corruption.
+      responseText = await readProviderResponseText(res);
+      data = JSON.parse(responseText) as ChatCompletionResponse;
     } catch (err) {
       // An aborted body read (per-attempt deadline, client disconnect) is not
       // a malformed body — rethrow so it keeps its abort classification
@@ -464,9 +470,17 @@ export class OpenAICompatProvider extends BaseProvider {
       // sending JSON (Content-Type: application/json). Without that hint,
       // the parser is more likely choking on NDJSON, native API output, or
       // HTML — all "wrong endpoint" cases. This is the safe default.
+      const afterJsonError = /Unexpected non-whitespace character after JSON at position (\d+)/.exec(msg);
+      const errorPosition = afterJsonError ? Number(afterJsonError[1]) : -1;
+      // V8 reports the second document's first character for NDJSON, after a
+      // newline separator. Garbage immediately after a complete JSON document
+      // without a line break is more consistent with a body cut/corrupted
+      // mid-token. Explicit NDJSON/SSE media types always remain wrong-endpoint.
+      const hasLineBreakBeforeError = errorPosition >= 0 && /[\r\n]/.test(responseText.slice(0, errorPosition));
       const looksTruncated =
         /Unexpected end of JSON input/.test(msg) ||
-        (/Unexpected non-whitespace character after JSON at position/.test(msg) && looksLikeJson && !looksLikeNdjson);
+        (/Unexpected non-whitespace character after JSON at position/.test(msg) &&
+          looksLikeJson && !looksLikeNdjson && !hasLineBreakBeforeError);
       if (looksTruncated) {
         throw new Error(
           `${this.name} returned 200 but the response body was truncated mid-stream ` +
@@ -538,7 +552,7 @@ export class OpenAICompatProvider extends BaseProvider {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
+      const err = await readProviderResponseJson(res).catch(() => ({}));
       const rescued = this.rescueFailedGeneration(err, options);
       if (rescued) {
         console.log(`[${this.name}] Rescued ${rescued.length} inline tool call(s) from a ${res.status} tool_use_failed (stream, #264)`);
@@ -653,7 +667,7 @@ export class OpenAICompatProvider extends BaseProvider {
     // healthy (#1557). Thrown, so health records an error without counting it
     // toward auto-disable. Provider-specific validate URLs keep their own shape.
     if (res.ok && !this.validateUrl && typeof res.text === 'function') {
-      const text = await res.text().catch(() => '');
+      const text = await readProviderResponseText(res).catch(() => '');
       try {
         JSON.parse(text);
       } catch {
@@ -688,7 +702,7 @@ export class OpenAICompatProvider extends BaseProvider {
         },
       }, 10_000, { timeoutBounds: 'request' });
       if (!res.ok) return false;
-      const body: any = await res.json().catch(() => null);
+      const body: any = await readProviderResponseJson(res).catch(() => null);
       const scope = (body && typeof body === 'object' && body.data && typeof body.data === 'object')
         ? [body.data, body]
         : [body];

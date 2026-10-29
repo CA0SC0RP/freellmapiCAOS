@@ -93,11 +93,7 @@ describe('native Gemini /v1beta surface', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       if (String(url).includes('api.groq.com/openai/v1/chat/completions')) {
         upstreamBody = JSON.parse(String(init?.body));
-        return {
-          ok: true,
-          headers: new Headers(),
-          json: async () => completion,
-        } as any;
+        return new Response(JSON.stringify(completion), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return originalFetch(url, init);
     });
@@ -132,26 +128,22 @@ describe('native Gemini /v1beta surface', () => {
     const originalFetch = global.fetch;
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       if (String(url).includes('api.groq.com/openai/v1/chat/completions')) {
-        return {
-          ok: true,
-          headers: new Headers(),
-          json: async () => ({
-            ...completion,
-            choices: [{
-              index: 0,
-              message: {
-                role: 'assistant',
-                content: null,
-                tool_calls: [{
-                  id: 'call_read',
-                  type: 'function',
-                  function: { name: 'read_file', arguments: '{"path":"README.md"}' },
-                }],
-              },
-              finish_reason: 'tool_calls',
-            }],
-          }),
-        } as any;
+        return new Response(JSON.stringify({
+          ...completion,
+          choices: [{
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [{
+                id: 'call_read',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{"path":"README.md"}' },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return originalFetch(url, init);
     });
