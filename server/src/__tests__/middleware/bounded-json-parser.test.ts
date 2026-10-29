@@ -63,7 +63,7 @@ describe('bounded JSON body parser admission', () => {
 
     const next = vi.fn() as unknown as NextFunction;
     finish(new Error('invalid JSON'));
-    expect(next).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
 
     const nextAfterError = vi.fn() as unknown as NextFunction;
     second(request(), response(), nextAfterError);
