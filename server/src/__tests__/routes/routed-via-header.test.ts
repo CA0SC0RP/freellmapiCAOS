@@ -78,7 +78,7 @@ function mockRelay(): void {
           }),
         } as any;
       }
-      return { ok: true, headers: new Headers(), json: async () => chatCompletion } as any;
+      return new Response(JSON.stringify(chatCompletion), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     return origFetch(url as any, init);
   });
