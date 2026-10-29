@@ -631,7 +631,7 @@ async function callVideoProvider(
         clientSignal,
       );
       return {
-        video: bufferView(await readProviderResponseBytes(r, MAX_VIDEO_RESPONSE_BYTES)), 
+        video: bufferView(await readProviderResponseBytes(r, MAX_VIDEO_RESPONSE_BYTES)),
         contentType: r.headers.get('content-type') ?? 'video/mp4',
       };
     }
@@ -755,7 +755,7 @@ async function callSpeechProvider(
         body: JSON.stringify(body),
       });
       return {
-        audio: bufferView(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES)), 
+        audio: bufferView(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES)),
         contentType: r.headers.get('content-type') ?? contentTypeFor(fmt),
       };
     }
@@ -785,7 +785,7 @@ async function callSpeechProvider(
           response_format: fmt,
         }),
       });
-      return { audio: bufferView(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES)),  contentType: contentTypeFor(fmt) };
+      return { audio: bufferView(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES)), contentType: contentTypeFor(fmt) };
     }
     case 'pollinations': {
       // OpenAI-shaped chat-completions with the audio modality returns b64 audio.
