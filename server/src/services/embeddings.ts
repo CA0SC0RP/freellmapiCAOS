@@ -23,6 +23,7 @@ import { SPEKA_BASE_URL } from '../providers/speka.js';
 import { ELECTRONHUB_BASE_URL } from '../providers/electronhub.js';
 import { INFERBASE_BASE_URL } from '../providers/inferbase.js';
 import { LLMTR_BASE_URL } from '../providers/llmtr.js';
+import { readProviderResponseJson, readProviderResponseText } from '../providers/response-body.js';
 
 export interface EmbeddingModelRow {
   id: number;
@@ -69,7 +70,7 @@ export class EmbeddingsError extends Error {
 async function upstreamEmbeddingsError(r: Response): Promise<EmbeddingsError> {
   const retryAfterMs = parseRetryAfterMs(r.headers?.get('retry-after') ?? null);
   return new EmbeddingsError(
-    `upstream ${r.status}: ${(await r.text()).slice(0, 200)}`,
+    `upstream ${r.status}: ${(await readProviderResponseText(r)).slice(0, 200)}`,
     r.status,
     undefined,
     retryAfterMs,
@@ -159,7 +160,7 @@ async function openAiStyleEmbed(
   if (!r.ok) {
     throw await upstreamEmbeddingsError(r);
   }
-  const j = (await r.json()) as {
+  const j = (await readProviderResponseJson(r)) as {
     model?: string;
     data?: { index?: number; embedding: number[] }[];
     usage?: { prompt_tokens?: number; total_tokens?: number };
@@ -321,7 +322,7 @@ async function callProvider(row: EmbeddingModelRow, credential: ProviderCredenti
         row.platform, 'embedding', FETCH_TIMEOUT_MS,
       );
       if (!r.ok) throw await upstreamEmbeddingsError(r);
-      const j = await r.json() as number[][] | number[];
+      const j = await readProviderResponseJson(r) as number[][] | number[];
       const vectors = Array.isArray(j[0]) ? (j as number[][]) : [j as number[]];
       return { vectors, inputTokens: null };
     }
@@ -338,7 +339,7 @@ async function callProvider(row: EmbeddingModelRow, credential: ProviderCredenti
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       }, row.platform, 'embedding', FETCH_TIMEOUT_MS);
       if (!r.ok) throw await upstreamEmbeddingsError(r);
-      const j = (await r.json()) as { embeddings?: { float?: number[][] }; meta?: { billed_units?: { input_tokens?: number } } };
+      const j = (await readProviderResponseJson(r)) as { embeddings?: { float?: number[][] }; meta?: { billed_units?: { input_tokens?: number } } };
       return { vectors: j.embeddings?.float ?? [], inputTokens: j.meta?.billed_units?.input_tokens ?? null };
     }
     default:
