@@ -10,7 +10,20 @@ export async function readProviderResponseText(res: Response, maxBytes = MAX_PRO
   }
 
   const reader = res.body?.getReader();
-  if (!reader) return '';
+  if (!reader) {
+    // Some existing tests and third-party Response-like adapters expose text()
+    // without a Web ReadableStream body. Keep that compatibility, but still
+    // check the returned string's encoded byte length.
+    if (typeof (res as any).text === 'function') {
+      const text = await (res as any).text() as string;
+      if (new TextEncoder().encode(text).byteLength > maxBytes) {
+        throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
+      }
+      return text;
+    }
+    return '';
+  }
+
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
@@ -39,5 +52,15 @@ export async function readProviderResponseText(res: Response, maxBytes = MAX_PRO
 
 /** Parse bounded JSON from an upstream provider. */
 export async function readProviderResponseJson<T = unknown>(res: Response, maxBytes = MAX_PROVIDER_RESPONSE_BYTES): Promise<T> {
+  if (!res.body && typeof (res as any).json === 'function') {
+    // Compatibility for Response-like test doubles with a json() method but
+    // no stream body. Native Fetch Responses use the bounded stream path above.
+    const value = await (res as any).json();
+    const serialized = JSON.stringify(value);
+    if (serialized !== undefined && new TextEncoder().encode(serialized).byteLength > maxBytes) {
+      throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
+    }
+    return value as T;
+  }
   return JSON.parse(await readProviderResponseText(res, maxBytes)) as T;
 }
