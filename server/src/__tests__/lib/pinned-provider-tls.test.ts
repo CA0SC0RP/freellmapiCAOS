@@ -16,8 +16,9 @@ describe.skipIf(!tlsFixtureAvailable)('pinned custom-provider HTTPS/TLS', () => 
   afterEach(async () => {
     await Promise.all(servers.splice(0).map(async (server) => {
       if (!server.listening) return;
+      const closed = once(server, 'close');
       server.close();
-      await once(server, 'close');
+      await closed;
     }));
   });
 
