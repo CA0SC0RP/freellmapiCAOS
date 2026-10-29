@@ -74,7 +74,7 @@ describe('Provider error redaction', () => {
             error: {
               message: `Invalid Bearer ${leakedKey} for ${leakedUrl}`,
             },
-          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
+          }), { status: 401, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -108,7 +108,7 @@ describe('Provider error redaction', () => {
             error: {
               message: 'tool schema not supported',
             },
-          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
+          }), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
