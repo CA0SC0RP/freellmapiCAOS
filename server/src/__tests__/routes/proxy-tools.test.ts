@@ -69,9 +69,7 @@ describe('Proxy tool-calling support', () => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
         providerBody = JSON.parse((init as any).body);
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-tool',
             object: 'chat.completion',
             created: 123,
@@ -93,8 +91,7 @@ describe('Proxy tool-calling support', () => {
               finish_reason: 'tool_calls',
             }],
             usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -132,9 +129,7 @@ describe('Proxy tool-calling support', () => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
         providerBody = JSON.parse((init as any).body);
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-final',
             object: 'chat.completion',
             created: 123,
@@ -148,8 +143,7 @@ describe('Proxy tool-calling support', () => {
               finish_reason: 'stop',
             }],
             usage: { prompt_tokens: 18, completion_tokens: 6, total_tokens: 24 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -194,14 +188,11 @@ describe('Proxy tool-calling support', () => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
         providerBody = JSON.parse((init as any).body);
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-r', object: 'chat.completion', created: 1, model: 'm',
             choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }],
             usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -235,9 +226,7 @@ describe('Proxy tool-calling support', () => {
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
         turn += 1;
         if (turn === 2) providerBody = JSON.parse((init as any).body);
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-r', object: 'chat.completion', created: 1, model: 'm',
             choices: [{
               index: 0,
@@ -251,8 +240,7 @@ describe('Proxy tool-calling support', () => {
               finish_reason: 'stop',
             }],
             usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -288,15 +276,12 @@ describe('Proxy tool-calling support', () => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
         providerBody = JSON.parse((init as any).body);
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-p', object: 'chat.completion', created: 1, model: 'm',
             // No reasoning_content anywhere in this session.
             choices: [{ index: 0, message: { role: 'assistant', content: 'plain answer 2' }, finish_reason: 'stop' }],
             usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -329,9 +314,7 @@ describe('Proxy tool-calling support', () => {
         if (calls.length === 2) {
           return new Response(JSON.stringify({ error: { message: 'rate limited' } }), { status: 429 }) as any;
         }
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-f', object: 'chat.completion', created: 1, model: 'm',
             choices: [{
               index: 0,
@@ -343,8 +326,7 @@ describe('Proxy tool-calling support', () => {
               finish_reason: 'stop',
             }],
             usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });

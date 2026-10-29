@@ -52,16 +52,12 @@ function sseResponseNoUsage(text = 'hi') {
     `data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n`,
     'data: [DONE]\n\n',
   ];
-  return {
-    ok: true,
-    body: new ReadableStream<Uint8Array>({
+  return new Response(new ReadableStream<Uint8Array>({
       start(controller) {
         for (const f of frames) controller.enqueue(encoder.encode(f));
         controller.close();
       },
-    }),
-    headers: new Headers(),
-  };
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
 /** SSE Response whose final frame carries an upstream usage block. */
@@ -73,16 +69,12 @@ function sseResponseWithUsage() {
     `data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":2,"total_tokens":13}}\n\n`,
     'data: [DONE]\n\n',
   ];
-  return {
-    ok: true,
-    body: new ReadableStream<Uint8Array>({
+  return new Response(new ReadableStream<Uint8Array>({
       start(controller) {
         for (const f of frames) controller.enqueue(encoder.encode(f));
         controller.close();
       },
-    }),
-    headers: new Headers(),
-  };
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
 /** SSE Response with usage-only frame emitted MID-STREAM (before the finish chunk). */
@@ -95,16 +87,12 @@ function sseResponseUsageMidStream() {
     `data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n`,
     'data: [DONE]\n\n',
   ];
-  return {
-    ok: true,
-    body: new ReadableStream<Uint8Array>({
+  return new Response(new ReadableStream<Uint8Array>({
       start(controller) {
         for (const f of frames) controller.enqueue(encoder.encode(f));
         controller.close();
       },
-    }),
-    headers: new Headers(),
-  };
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
 /** SSE Response with usage attached to a CONTENT frame (non-final position). */
@@ -115,16 +103,12 @@ function sseResponseUsageOnContentFrame() {
     `data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n`,
     'data: [DONE]\n\n',
   ];
-  return {
-    ok: true,
-    body: new ReadableStream<Uint8Array>({
+  return new Response(new ReadableStream<Uint8Array>({
       start(controller) {
         for (const f of frames) controller.enqueue(encoder.encode(f));
         controller.close();
       },
-    }),
-    headers: new Headers(),
-  };
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
 function usageFrames(raw: string) {
@@ -227,9 +211,7 @@ describe('Streaming usage-frame fallback injection', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-nousage',
             object: 'chat.completion',
             created: 123,
@@ -240,8 +222,7 @@ describe('Streaming usage-frame fallback injection', () => {
               finish_reason: 'stop',
             }],
             // No `usage` block — the #1084 scenario.
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });

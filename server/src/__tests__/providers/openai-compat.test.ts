@@ -27,7 +27,7 @@ describe('OpenAICompatProvider', () => {
         controller.close();
       },
     });
-    return { ok: true, body: stream, headers: new Headers() };
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
   }
 
   async function collect<T>(gen: AsyncGenerator<T>): Promise<T[]> {
@@ -50,17 +50,14 @@ describe('OpenAICompatProvider', () => {
       capturedUrl = url as string;
       capturedHeaders = (init as any).headers;
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'test-id',
           object: 'chat.completion',
           created: 123,
           model: 'test-model',
           choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion('my-key', [{ role: 'user', content: 'test' }], 'test-model');
@@ -81,17 +78,14 @@ describe('OpenAICompatProvider', () => {
       let captured: any = null;
       vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
         captured = JSON.parse((init as any).body);
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'test-id',
             object: 'chat.completion',
             created: 123,
             model: 'test-model',
             choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
             usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       });
       return { body: () => captured };
     }
@@ -163,17 +157,14 @@ describe('OpenAICompatProvider', () => {
       delays.push(ms ?? 0);
       return origSetTimeout(fn, ms);
     }) as typeof setTimeout);
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'test-id',
         object: 'chat.completion',
         created: 123,
         model: 'test-model',
         choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }),
-    } as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any);
 
     await provider.chatCompletion('my-key', [{ role: 'user', content: 'test' }], 'test-model');
 
@@ -211,17 +202,14 @@ describe('OpenAICompatProvider', () => {
     let capturedBody: any = null;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'test-id',
           object: 'chat.completion',
           created: 123,
           model: 'test-model',
           choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [] }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -258,45 +246,37 @@ describe('OpenAICompatProvider', () => {
       baseUrl: 'https://integrate.api.nvidia.com/v1',
       forceSingleToolCall: true,
     });
-    const okResponse = {
-      ok: true,
-      json: () => Promise.resolve({
+    const okResponse = () => new Response(JSON.stringify({
         id: 'x', object: 'chat.completion', created: 1, model: 'm',
         choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }),
-    } as any;
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     const tools = [{ type: 'function' as const, function: { name: 'f', description: 'd', parameters: { type: 'object', properties: {} } } }];
 
     it('pins parallel_tool_calls to false when tools are present, even if the caller asked for true', async () => {
       let body: any = null;
-      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse; });
+      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse(); });
       await nim().chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm', { tools, parallel_tool_calls: true });
       expect(body.parallel_tool_calls).toBe(false);
     });
 
     it('leaves parallel_tool_calls untouched when there are no tools', async () => {
       let body: any = null;
-      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse; });
+      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse(); });
       await nim().chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm', {});
       expect(body.parallel_tool_calls).toBeUndefined();
     });
 
     it('does not affect providers without the flag (parallel_tool_calls passes through)', async () => {
       let body: any = null;
-      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse; });
+      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse(); });
       await provider.chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm', { tools, parallel_tool_calls: true });
       expect(body.parallel_tool_calls).toBe(true);
     });
   });
 
   it('should throw on error response', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: false,
-      status: 429,
-      statusText: 'Rate Limited',
-      json: () => Promise.resolve({ error: { message: 'Too many requests' } }),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Too many requests' } }), { status: 429, headers: { 'Content-Type': 'application/json' } }) as any);
 
     await expect(
       provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model')
@@ -307,11 +287,9 @@ describe('OpenAICompatProvider', () => {
     // e.g. a custom base URL pointing at Ollama's native NDJSON /api endpoint:
     // real fetch's res.json() rejects with "Unexpected non-whitespace character
     // after JSON at position …", which is useless to the user.
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.reject(new SyntaxError('Unexpected non-whitespace character after JSON at position 583 (line 27 column 2)')),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"object":"list"}\n{"object":"list"}', {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }) as any);
 
     await expect(
       provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model')
@@ -325,12 +303,9 @@ describe('OpenAICompatProvider', () => {
     // the NDJSON / native-API case above. Operators were chasing a base-URL bug that
     // didn't exist because both paths produced the same error string.
     const headers = new Headers({ 'content-type': 'application/json' });
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers,
-      json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"choices":[', {
+      status: 200, headers,
+    }) as any);
 
     let caught: Error | null = null;
     try {
@@ -349,12 +324,9 @@ describe('OpenAICompatProvider', () => {
     // mid-token garbage character before EOF. Content-Type is the only signal
     // that distinguishes this from a real NDJSON upstream (next test).
     const headers = new Headers({ 'content-type': 'application/json' });
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers,
-      json: () => Promise.reject(new SyntaxError('Unexpected non-whitespace character after JSON at position 4096 (line 1 column 4097)')),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"choices":[]}garbage', {
+      status: 200, headers,
+    }) as any);
 
     await expect(
       provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model')
@@ -367,12 +339,9 @@ describe('OpenAICompatProvider', () => {
     // substring (NDJSON bodies do — the parser eats one object, then trips
     // on the next one), we must not misclassify it as a CDN truncation.
     const headers = new Headers({ 'content-type': 'application/x-ndjson' });
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers,
-      json: () => Promise.reject(new SyntaxError('Unexpected non-whitespace character after JSON at position 120 (line 3 column 1)')),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"object":"list"}\n{"object":"list"}', {
+      status: 200, headers,
+    }) as any);
 
     await expect(
       provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model')
@@ -383,12 +352,9 @@ describe('OpenAICompatProvider', () => {
     // Companion to the previous test: explicitly assert the truncation message
     // does NOT appear, so a future refactor can't silently switch the branch.
     const headers = new Headers({ 'content-type': 'application/x-ndjson' });
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers,
-      json: () => Promise.reject(new SyntaxError('Unexpected non-whitespace character after JSON at position 120 (line 3 column 1)')),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"object":"list"}\n{"object":"list"}', {
+      status: 200, headers,
+    }) as any);
 
     let caught: Error | null = null;
     try {
@@ -408,32 +374,21 @@ describe('OpenAICompatProvider', () => {
 
   it('validateKey treats a 200 that is not JSON as an error, not a healthy key (#1557)', async () => {
     // Retired GitHub Models answered every path with 200 "OK" in plain text.
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-type': 'text/plain' }),
-      text: () => Promise.resolve('OK\n'),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('OK\n', {
+      status: 200, headers: { 'Content-Type': 'text/plain' },
+    }) as any);
     await expect(provider.validateKey('any')).rejects.toThrow(/did not answer JSON/);
   });
 
   it('validateKey accepts a JSON model list', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      text: () => Promise.resolve('{"object":"list","data":[]}'),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"object":"list","data":[]}', {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }) as any);
     expect(await provider.validateKey('valid')).toBe(true);
   });
 
   it('validateKey preserves the provider reason on confirmed 401', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      statusText: 'Unauthorized',
-      json: () => Promise.resolve({ error: { message: 'This token has expired' } }),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'This token has expired' } }), { status: 401, headers: { 'Content-Type': 'application/json' } }) as any);
     expect(await provider.validateKey('bad')).toEqual({
       valid: false,
       error: 'TestProvider key validation failed (HTTP 401): This token has expired',
@@ -446,9 +401,7 @@ describe('OpenAICompatProvider', () => {
   });
 
   it('folds reasoning_content into content when content is empty (Z.ai glm-4.5-flash style)', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -456,17 +409,14 @@ describe('OpenAICompatProvider', () => {
           finish_reason: 'stop',
         }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }),
-    } as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any);
 
     const result = await provider.chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm');
     expect(result.choices[0].message.content).toBe('the actual answer');
   });
 
   it('flattens array content into a string (Mistral magistral style)', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -474,8 +424,7 @@ describe('OpenAICompatProvider', () => {
           finish_reason: 'stop',
         }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }),
-    } as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any);
 
     const result = await provider.chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm');
     expect(result.choices[0].message.content).toBe('part one part two');
@@ -485,14 +434,11 @@ describe('OpenAICompatProvider', () => {
     let body: any = null;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       body = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'id', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     const mistral = new OpenAICompatProvider({ platform: 'mistral', name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1' });
@@ -525,14 +471,11 @@ describe('OpenAICompatProvider', () => {
     let body: any = null;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       body = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'id', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     const groq = new OpenAICompatProvider({ platform: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1' });
@@ -555,14 +498,11 @@ describe('OpenAICompatProvider', () => {
     let body: any = null;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       body = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'id', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     const cerebras = new OpenAICompatProvider({ platform: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1' });
@@ -584,9 +524,7 @@ describe('OpenAICompatProvider', () => {
   });
 
   it('folds reasoning into content when content is empty (Ollama style — bare `reasoning` field)', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -594,17 +532,14 @@ describe('OpenAICompatProvider', () => {
           finish_reason: 'stop',
         }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }),
-    } as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any);
 
     const result = await provider.chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm');
     expect(result.choices[0].message.content).toBe('ollama answer');
   });
 
   it('prefers reasoning_content over reasoning when both are present', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -612,17 +547,14 @@ describe('OpenAICompatProvider', () => {
           finish_reason: 'stop',
         }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }),
-    } as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any);
 
     const result = await provider.chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm');
     expect(result.choices[0].message.content).toBe('preferred');
   });
 
   it('does NOT fold reasoning_content when tool_calls are present', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -635,8 +567,7 @@ describe('OpenAICompatProvider', () => {
           finish_reason: 'tool_calls',
         }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }),
-    } as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any);
 
     const result = await provider.chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm');
     expect(result.choices[0].message.content).toBeNull();
@@ -644,9 +575,7 @@ describe('OpenAICompatProvider', () => {
   });
 
   it('leaves real string content untouched', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         id: 'id', object: 'chat.completion', created: 1, model: 'm',
         choices: [{
           index: 0,
@@ -654,8 +583,7 @@ describe('OpenAICompatProvider', () => {
           finish_reason: 'stop',
         }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }),
-    } as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any);
 
     const result = await provider.chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm');
     expect(result.choices[0].message.content).toBe('normal answer');
@@ -705,14 +633,11 @@ describe('OpenAICompatProvider - platform instances', () => {
       let capturedUrl = '';
       vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
         capturedUrl = url as string;
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'id', object: 'chat.completion', created: 1, model: 'm',
             choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
             usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       });
 
       const result = await provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model');
@@ -730,15 +655,11 @@ describe('OpenAICompatProvider - platform instances', () => {
     let body: Record<string, unknown> = {};
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       body = JSON.parse(String((init as RequestInit).body));
-      return {
-        ok: true,
-        headers: new Headers(),
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'id', object: 'chat.completion', created: 1, model: 'mistral/leanstral-1-5',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -774,10 +695,7 @@ describe('OpenAICompatProvider - platform instances', () => {
     };
 
     it('non-stream: rescues failed_generation into structured tool_calls', async () => {
-      vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-        ok: false, status: 400, statusText: 'Bad Request',
-        json: () => Promise.resolve(failBody),
-      } as any);
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(failBody), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
 
       const r = await provider.chatCompletion('key', [{ role: 'user', content: 'read sample.txt' }], 'llama-3.3-70b-versatile', { tools, tool_choice: 'auto' });
       expect(r.choices[0].finish_reason).toBe('tool_calls');
@@ -788,10 +706,7 @@ describe('OpenAICompatProvider - platform instances', () => {
     });
 
     it('stream: yields a synthesized tool_calls turn instead of throwing', async () => {
-      vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-        ok: false, status: 400, statusText: 'Bad Request',
-        json: () => Promise.resolve(failBody),
-      } as any);
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(failBody), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
 
       const chunks: any[] = [];
       for await (const c of provider.streamChatCompletion('key', [{ role: 'user', content: 'read sample.txt' }], 'llama-3.3-70b-versatile', { tools, tool_choice: 'auto' })) {
@@ -810,13 +725,10 @@ describe('OpenAICompatProvider - platform instances', () => {
     it('declines the rescue when the recovered arguments violate the schema', async () => {
       process.env.VALIDATE_TOOL_ARGUMENTS = '1';
       try {
-        vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-          ok: false, status: 400, statusText: 'Bad Request',
-          json: () => Promise.resolve({
+        vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
             ...failBody,
             error: { ...failBody.error, failed_generation: '<function=read={"nope": "sample.txt"}</function>' },
-          }),
-        } as any);
+          }), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
 
         await expect(
           provider.chatCompletion('key', [{ role: 'user', content: 'read sample.txt' }], 'llama-3.3-70b-versatile', { tools, tool_choice: 'auto' }),
@@ -829,10 +741,7 @@ describe('OpenAICompatProvider - platform instances', () => {
     it('still rescues schema-valid arguments while the verdict is on', async () => {
       process.env.VALIDATE_TOOL_ARGUMENTS = '1';
       try {
-        vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-          ok: false, status: 400, statusText: 'Bad Request',
-          json: () => Promise.resolve(failBody),
-        } as any);
+        vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(failBody), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
 
         const r = await provider.chatCompletion('key', [{ role: 'user', content: 'read sample.txt' }], 'llama-3.3-70b-versatile', { tools, tool_choice: 'auto' });
         expect(JSON.parse(r.choices[0].message.tool_calls![0].function.arguments)).toEqual({ file_path: 'sample.txt' });
@@ -842,10 +751,7 @@ describe('OpenAICompatProvider - platform instances', () => {
     });
 
     it('still throws when there is no failed_generation to rescue', async () => {
-      vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-        ok: false, status: 400, statusText: 'Bad Request',
-        json: () => Promise.resolve({ error: { message: 'bad request', code: 'invalid_request' } }),
-      } as any);
+      vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: { message: 'bad request', code: 'invalid_request' } }), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
       await expect(
         provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'm', { tools }),
       ).rejects.toThrow(/API error 400/);
@@ -854,14 +760,11 @@ describe('OpenAICompatProvider - platform instances', () => {
 });
 
 describe('extended sampling param passthrough', () => {
-  const mockOk = () => ({
-    ok: true,
-    json: () => Promise.resolve({
+  const mockOk = () => (new Response(JSON.stringify({
       id: 'x', object: 'chat.completion', created: 1, model: 'm',
       choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }),
-  }) as any;
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as any;
 
   const extended = {
     seed: 42, top_k: 40, min_p: 0.05, presence_penalty: 0.5, frequency_penalty: -0.25,
@@ -925,14 +828,11 @@ describe('reasoning: request knob + <think> extraction (P2 #16)', () => {
     vi.restoreAllMocks();
   });
 
-  const mockOk = (content: string, extra: Record<string, unknown> = {}) => ({
-    ok: true,
-    json: () => Promise.resolve({
+  const mockOk = (content: string, extra: Record<string, unknown> = {}) => (new Response(JSON.stringify({
       id: 'x', object: 'chat.completion', created: 1, model: 'm',
       choices: [{ index: 0, message: { role: 'assistant', content, ...extra }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }),
-  }) as any;
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as any;
 
   function sse(frames: string[]): any {
     const stream = new ReadableStream<Uint8Array>({
@@ -942,7 +842,7 @@ describe('reasoning: request knob + <think> extraction (P2 #16)', () => {
         controller.close();
       },
     });
-    return { ok: true, body: stream, headers: new Headers() };
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
   }
 
   async function collect<T>(g: AsyncGenerator<T>): Promise<T[]> {
@@ -1080,7 +980,7 @@ describe('OpenAICompatProvider in-band out-of-credits notice (#pollinations-inba
         controller.close();
       },
     });
-    return { ok: true, body: stream, headers: new Headers() };
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
   }
   const dataFrame = (delta: Record<string, unknown>, finish: string | null = null) =>
     `data: ${JSON.stringify({ id: 's1', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
@@ -1104,27 +1004,19 @@ describe('OpenAICompatProvider in-band out-of-credits notice (#pollinations-inba
   });
 
   it('non-stream: throws a payment-required error instead of returning the notice', async () => {
-    vi.spyOn(global, 'fetch').mockImplementation(async () => ({
-      ok: true,
-      headers: new Headers(),
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockImplementation(async () => (new Response(JSON.stringify({
         id: 'x', object: 'chat.completion', created: 1, model: 'm',
         choices: [{ index: 0, message: { role: 'assistant', content: CREDITS }, finish_reason: 'stop' }],
-      }),
-    }) as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as any);
     await expect(provider().chatCompletion('k', [{ role: 'user', content: 'q' }], 'm'))
       .rejects.toThrow(/402|insufficient credit/i);
   });
 
   it('non-stream: a normal reply is returned unchanged', async () => {
-    vi.spyOn(global, 'fetch').mockImplementation(async () => ({
-      ok: true,
-      headers: new Headers(),
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockImplementation(async () => (new Response(JSON.stringify({
         id: 'x', object: 'chat.completion', created: 1, model: 'm',
         choices: [{ index: 0, message: { role: 'assistant', content: 'hello there' }, finish_reason: 'stop' }],
-      }),
-    }) as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as any);
     const res = await provider().chatCompletion('k', [{ role: 'user', content: 'q' }], 'm');
     expect(res.choices[0].message.content).toBe('hello there');
   });
@@ -1159,15 +1051,12 @@ describe('pinned tool_choice retry on custom endpoints (#1548)', () => {
   const tagNote = { type: 'function' as const, function: { name: 'tag_note', description: 'Tag a note', parameters: { type: 'object', properties: { tag: { type: 'string' } } } } };
   const pinned = { type: 'function' as const, function: { name: 'move_note' } };
   const messages = [{ role: 'user' as const, content: 'File this note under Finance.' }];
-  const badRequest = () => ({ ok: false, status: 400, statusText: 'Bad Request', json: () => Promise.resolve({}) }) as any;
-  const toolCallResponse = () => ({
-    ok: true,
-    json: () => Promise.resolve({
+  const badRequest = () => (new Response(JSON.stringify({}), { status: 400, statusText: "Bad Request", headers: { 'Content-Type': 'application/json' } })) as any;
+  const toolCallResponse = () => (new Response(JSON.stringify({
       id: 'x', object: 'chat.completion', created: 1, model: 'm',
       choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'move_note', arguments: '{"folder":"Finance"}' } }] }, finish_reason: 'tool_calls' }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }),
-  }) as any;
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as any;
   const toolCallStream = () => {
     const frames = [
       'data: {"id":"x","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"move_note","arguments":"{\\"folder\\":\\"Finance\\"}"}}]},"finish_reason":null}]}\n\n',
@@ -1181,7 +1070,7 @@ describe('pinned tool_choice retry on custom endpoints (#1548)', () => {
         controller.close();
       },
     });
-    return { ok: true, status: 200, body, headers: new Headers() } as any;
+    return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) as any;
   };
 
   /** Answer each request with the next response and record every request body. */
@@ -1238,7 +1127,7 @@ describe('pinned tool_choice retry on custom endpoints (#1548)', () => {
     expect(calls[0].function.name).toBe('move_note');
   });
 
-  const rejected = (message: string) => () => ({ ok: false, status: 400, statusText: 'Bad Request', json: () => Promise.resolve({ error: { message } }) }) as any;
+  const rejected = (message: string) => () => (new Response(JSON.stringify({ error: { message } }), { status: 400, statusText: "Bad Request", headers: { 'Content-Type': 'application/json' } })) as any;
 
   it('non-stream: throws the retry error when the rewritten request is rejected too, without a third attempt', async () => {
     const bodies = upstream(rejected('first rejection'), rejected('retry rejection'));
@@ -1268,7 +1157,7 @@ describe('pinned tool_choice retry on custom endpoints (#1548)', () => {
   });
 
   it('does not retry errors other than 400', async () => {
-    const bodies = upstream(() => ({ ok: false, status: 500, statusText: 'Internal Server Error', json: () => Promise.resolve({}) }) as any);
+    const bodies = upstream(() => (new Response(JSON.stringify({}), { status: 500, statusText: "Internal Server Error", headers: { 'Content-Type': 'application/json' } })) as any);
     await expect(custom().chatCompletion('k', messages, 'm', { tools: [moveNote], tool_choice: pinned })).rejects.toThrow('Custom API error 500');
     expect(bodies).toHaveLength(1);
   });
@@ -1293,14 +1182,11 @@ describe('OpenCode session header (#1639)', () => {
   function upstream() {
     return vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       (global as any).__lastHeaders = (init as any).headers;
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'x', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
   }
 
@@ -1333,15 +1219,16 @@ describe('OpenCode session header (#1639)', () => {
     const encoder = new TextEncoder();
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       (global as any).__lastHeaders = (init as any).headers;
-      const stream = new ReadableStream<Uint8Array>({ start(c) { for (const f of frames) c.enqueue(encoder.encode(f)); c.close(); } });
-      return {
-        ok: true, body: stream, headers: new Headers(),
-        json: () => Promise.resolve({
+      const requestBody = JSON.parse(String((init as any).body ?? '{}'));
+      if (requestBody.stream !== true) {
+        return new Response(JSON.stringify({
           id: 'x', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
+      }
+      const stream = new ReadableStream<Uint8Array>({ start(c) { for (const f of frames) c.enqueue(encoder.encode(f)); c.close(); } });
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) as any;
     });
     const zen = new OpenAICompatProvider({ platform: 'custom', name: 'OpenCode Go', baseUrl: 'https://zen.opencode.ai/v1' });
     for await (const _chunk of zen.streamChatCompletion('k', [{ role: 'user', content: 'hi' }], 'm')) { /* drain */ }
@@ -1356,7 +1243,7 @@ describe('OpenCode session header (#1639)', () => {
     const zen = new OpenAICompatProvider({ platform: 'custom', name: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1' });
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       (global as any).__lastHeaders = (init as any).headers;
-      return { ok: true, status: 200, headers: new Headers(), json: () => Promise.resolve({ data: [] }) } as any;
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
     await zen.validateKey?.('k');
     if ((global as any).__lastHeaders) {

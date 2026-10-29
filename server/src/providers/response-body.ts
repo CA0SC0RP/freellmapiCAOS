@@ -3,27 +3,45 @@ export const MAX_PROVIDER_RESPONSE_BYTES = 2 * 1024 * 1024;
 /** Maximum permitted size of one streamed SSE line/frame. */
 export const MAX_PROVIDER_STREAM_FRAME_BYTES = 2 * 1024 * 1024;
 
+type StreamReader = {
+  read(): Promise<{ done: boolean; value?: Uint8Array }>;
+  cancel(): Promise<void>;
+  releaseLock(): void;
+};
+
+type ResponseBodyLike = {
+  headers?: { get(name: string): string | null };
+  body?: {
+    getReader?: () => StreamReader;
+    cancel?: () => Promise<void>;
+  } | null;
+  text?: () => Promise<string>;
+  json?: () => Promise<unknown>;
+};
+
 /** Read a response body while enforcing a hard byte limit independent of Content-Length. */
-export async function readProviderResponseText(res: Response, maxBytes = MAX_PROVIDER_RESPONSE_BYTES): Promise<string> {
-  const declared = Number(res.headers.get('content-length'));
+export async function readProviderResponseText(
+  response: Response | ResponseBodyLike,
+  maxBytes = MAX_PROVIDER_RESPONSE_BYTES,
+): Promise<string> {
+  const res = response as ResponseBodyLike;
+  const declaredHeader = res.headers?.get?.('content-length');
+  const declared = declaredHeader == null || declaredHeader.trim() === '' ? NaN : Number(declaredHeader);
   if (Number.isFinite(declared) && declared > maxBytes) {
-    try { await res.body?.cancel(); } catch { /* already closed */ }
+    try { await res.body?.cancel?.(); } catch { /* already closed */ }
     throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
   }
 
-  const reader = res.body?.getReader();
+  // Use a stream whenever one is available, regardless of instanceof Response.
+  // This also covers cross-realm Responses and Response-like adapters.
+  const reader = res.body?.getReader?.();
   if (!reader) {
-    // Some existing tests and third-party Response-like adapters expose text()
-    // without a Web ReadableStream body. Keep that compatibility, but still
-    // check the returned string's encoded byte length.
-    if (typeof (res as any).text === 'function') {
-      const text = await (res as any).text() as string;
-      if (new TextEncoder().encode(text).byteLength > maxBytes) {
-        throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
-      }
-      return text;
-    }
-    return '';
+    // An explicit null body is a valid empty body. For other adapters, a text()
+    // or json() method alone cannot enforce a pre-allocation limit: reject it
+    // instead of materializing an unbounded body and checking only afterward.
+    if ('body' in res && res.body === null) return '';
+    if (!('body' in res) && typeof res.text !== 'function' && typeof res.json !== 'function') return '';
+    throw new Error('Provider response has no readable stream; refusing an unbounded body read');
   }
 
   const chunks: Uint8Array[] = [];
@@ -32,6 +50,9 @@ export async function readProviderResponseText(res: Response, maxBytes = MAX_PRO
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (!(value instanceof Uint8Array)) {
+        throw new Error('Provider response stream returned an invalid chunk');
+      }
       total += value.byteLength;
       if (total > maxBytes) {
         try { await reader.cancel(); } catch { /* already closed */ }
@@ -52,21 +73,13 @@ export async function readProviderResponseText(res: Response, maxBytes = MAX_PRO
   return new TextDecoder().decode(bytes);
 }
 
-/** Parse bounded JSON from an upstream provider. */
-export async function readProviderResponseJson<T = unknown>(res: Response, maxBytes = MAX_PROVIDER_RESPONSE_BYTES): Promise<T> {
-  if (!(res instanceof Response) && typeof (res as any).json === 'function') {
-    // Compatibility for Response-like test doubles with a json() method but
-    // no stream body. Native Fetch Responses use the bounded stream path above.
-    const value = await (res as any).json();
-    const serialized = JSON.stringify(value);
-    if (serialized !== undefined && new TextEncoder().encode(serialized).byteLength > maxBytes) {
-      throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
-    }
-    return value as T;
-  }
+/** Parse bounded JSON from an upstream provider without unbounded json() fallback reads. */
+export async function readProviderResponseJson<T = unknown>(
+  res: Response | ResponseBodyLike,
+  maxBytes = MAX_PROVIDER_RESPONSE_BYTES,
+): Promise<T> {
   return JSON.parse(await readProviderResponseText(res, maxBytes)) as T;
 }
-
 
 /**
  * Reject an oversized transport chunk before decoding it into a potentially

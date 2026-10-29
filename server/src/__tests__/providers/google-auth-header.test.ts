@@ -22,13 +22,10 @@ describe('GoogleProvider credential placement', () => {
   });
 
   it('sends the key as x-goog-api-key on chatCompletion, never in the URL', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }],
-        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-      }),
-    } as any);
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any);
 
     await provider.chatCompletion(KEY, [{ role: 'user', content: 'Hi' }], 'gemini-2.5-pro');
 
@@ -60,12 +57,9 @@ describe('GoogleProvider credential placement', () => {
   });
 
   it('sends the key as x-goog-api-key on validateKey, never in the URL', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ models: [] }),
-      headers: new Headers(),
-    } as any);
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ models: [] }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }) as any);
 
     await provider.validateKey(KEY);
 

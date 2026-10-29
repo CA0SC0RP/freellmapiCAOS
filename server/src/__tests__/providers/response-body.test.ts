@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readProviderResponseText, readProviderResponseJson, MAX_PROVIDER_RESPONSE_BYTES, MAX_PROVIDER_STREAM_FRAME_BYTES, assertProviderStreamChunkWithinLimit } from '../../providers/response-body.js';
 
 describe('provider response body size limits', () => {
@@ -16,6 +16,26 @@ describe('provider response body size limits', () => {
       },
     }));
     await expect(readProviderResponseText(response)).rejects.toThrow(/exceeded/);
+  });
+
+  it('enforces the cap on a Response-like object with a readable stream', async () => {
+    const bytes = new Uint8Array(MAX_PROVIDER_RESPONSE_BYTES + 1);
+    const responseLike = {
+      headers: { get: () => null },
+      body: { getReader: () => new Response(bytes).body!.getReader() },
+      text: async () => { throw new Error('text fallback must not be used'); },
+    };
+    await expect(readProviderResponseText(responseLike)).rejects.toThrow(/exceeded/);
+  });
+
+  it('rejects adapters without a readable stream before calling unbounded text/json methods', async () => {
+    const text = vi.fn(async () => 'x'.repeat(MAX_PROVIDER_RESPONSE_BYTES + 1));
+    const json = vi.fn(async () => ({ payload: 'x'.repeat(MAX_PROVIDER_RESPONSE_BYTES + 1) }));
+    const responseLike = { text, json };
+    await expect(readProviderResponseText(responseLike)).rejects.toThrow(/no readable stream/);
+    await expect(readProviderResponseJson(responseLike)).rejects.toThrow(/no readable stream/);
+    expect(text).not.toHaveBeenCalled();
+    expect(json).not.toHaveBeenCalled();
   });
 
   it('parses a valid bounded JSON response', async () => {

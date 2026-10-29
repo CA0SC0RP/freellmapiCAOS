@@ -7,29 +7,21 @@ import type { KeyValidationFailure } from '../../providers/base.js';
 // this project yet (auth requires an Alibaba Cloud cn-site account binding).
 const GARBAGE_KEY = 'ms-test-invalid';
 
-const ROSTER = {
-  ok: true,
-  status: 200,
-  json: () => Promise.resolve({
-    object: 'list',
-    data: [
-      { id: 'Qwen/Qwen3-235B-A22B-Instruct-2507', object: 'model' },
-      { id: 'deepseek-ai/DeepSeek-V4-Flash', object: 'model' },
-    ],
-  }),
-};
+const rosterResponse = () => new Response(JSON.stringify({
+  object: 'list',
+  data: [
+    { id: 'Qwen/Qwen3-235B-A22B-Instruct-2507', object: 'model' },
+    { id: 'deepseek-ai/DeepSeek-V4-Flash', object: 'model' },
+  ],
+}), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
 // The verified keyless probe (2026-07-26): a 401 from chat/completions with a
 // garbage Bearer token. The alibaba-binding variant below is the
 // maintainer-documented shape for unbound accounts — unconfirmed until a
 // community tester runs a real token (#581).
-const AUTH_FAILED_401 = {
-  ok: false,
-  status: 401,
-  json: () => Promise.resolve({
-    error: { message: 'please bind your alibaba cloud account before use' },
-  }),
-};
+const authFailedResponse = () => new Response(JSON.stringify({
+  error: { message: 'please bind your alibaba cloud account before use' },
+}), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -56,8 +48,8 @@ describe('ModelScope validateKey (#581)', () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       calls.push({ url: String(url), init: init as RequestInit });
-      if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
-      return AUTH_FAILED_401 as unknown as Response;
+      if (String(url).endsWith('/models')) return rosterResponse() as unknown as Response;
+      return authFailedResponse() as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
@@ -84,17 +76,13 @@ describe('ModelScope validateKey (#581)', () => {
 
   it('returns true when the 1-token chat probe authenticates (200)', async () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
-      if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
-      return {
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({
+      if (String(url).endsWith('/models')) return rosterResponse() as unknown as Response;
+      return new Response(JSON.stringify({
           id: 'chatcmpl-1', object: 'chat.completion', created: 1,
           model: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
           choices: [{ index: 0, message: { role: 'assistant', content: 'p' }, finish_reason: 'length' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as unknown as Response;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
@@ -105,12 +93,8 @@ describe('ModelScope validateKey (#581)', () => {
     // ModelScope also 429s for retired models ("insufficient balance (1008)").
     // Neither case is an auth failure, so the key must not be disabled.
     vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
-      if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
-      return {
-        ok: false,
-        status: 429,
-        json: () => Promise.resolve({ error: { message: 'Request limit exceeded' } }),
-      } as unknown as Response;
+      if (String(url).endsWith('/models')) return rosterResponse() as unknown as Response;
+      return new Response(JSON.stringify({ error: { message: 'Request limit exceeded' } }), { status: 429, headers: { 'Content-Type': 'application/json' } }) as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
@@ -118,22 +102,18 @@ describe('ModelScope validateKey (#581)', () => {
   });
 
   it('throws (health status=error, never invalid) when the roster fetch fails', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: false,
-      status: 503,
-      json: () => Promise.resolve({}),
-    } as unknown as Response);
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({}), {
+      status: 503, headers: { 'Content-Type': 'application/json' },
+    }) as unknown as Response);
 
     const provider = new ModelScopeProvider();
     await expect(provider.validateKey(GARBAGE_KEY)).rejects.toThrow(/HTTP 503/);
   });
 
   it('throws when the roster is empty (no probe model available)', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ object: 'list', data: [] }),
-    } as unknown as Response);
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ object: 'list', data: [] }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }) as unknown as Response);
 
     const provider = new ModelScopeProvider();
     await expect(provider.validateKey(GARBAGE_KEY)).rejects.toThrow(/no models/);
@@ -141,17 +121,13 @@ describe('ModelScope validateKey (#581)', () => {
 
   it('caches a successful validation per key and skips the network on repeat checks', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
-      if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
-      return {
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({
+      if (String(url).endsWith('/models')) return rosterResponse() as unknown as Response;
+      return new Response(JSON.stringify({
           id: 'chatcmpl-1', object: 'chat.completion', created: 1,
           model: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
           choices: [{ index: 0, message: { role: 'assistant', content: 'p' }, finish_reason: 'length' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as unknown as Response;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
@@ -179,8 +155,8 @@ describe('ModelScope validateKey (#581)', () => {
 
   it('does not cache an invalid validation (a 401 re-probes on the next check)', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
-      if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
-      return AUTH_FAILED_401 as unknown as Response;
+      if (String(url).endsWith('/models')) return rosterResponse() as unknown as Response;
+      return authFailedResponse() as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();

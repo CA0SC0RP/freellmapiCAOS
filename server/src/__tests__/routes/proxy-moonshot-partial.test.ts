@@ -48,17 +48,14 @@ function stubUpstream(modelId: string): { url: () => string; body: () => any } {
     if (u.startsWith('https://api.moonshot.ai/') || u.startsWith('http://127.0.0.1:11434/')) {
       url = u;
       body = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'chatcmpl-partial',
           object: 'chat.completion',
           created: 123,
           model: modelId,
           choices: [{ index: 0, message: { role: 'assistant', content: ' 42.' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     }
     return origFetch(input, init);
   });

@@ -103,17 +103,14 @@ describe('compression routes and chat integration', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       if (String(url).includes('api.groq.com/openai/v1/chat/completions')) {
         forwarded.push(JSON.parse(String((init as RequestInit).body)));
-        return {
-          ok: true,
-          json: async () => ({
-            id: 'compression-test',
-            object: 'chat.completion',
-            created: 1,
-            model: 'openai/gpt-oss-120b',
-            choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
-            usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
-          }),
-        } as Response;
+        return new Response(JSON.stringify({
+          id: 'compression-test',
+          object: 'chat.completion',
+          created: 1,
+          model: 'openai/gpt-oss-120b',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as Response;
       }
       return originalFetch(url, init);
     });

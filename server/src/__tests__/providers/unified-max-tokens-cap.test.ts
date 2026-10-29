@@ -19,48 +19,47 @@ import {
 const MESSAGES = [{ role: 'user' as const, content: 'Hi' }];
 const CLIENT_ASKED = 65536; // Open WebUI's default
 
-function openAiJsonResponse(): any {
+function jsonResponse(payload: unknown): any {
+  const response = new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
   return {
     ok: true,
     status: 200,
-    json: () => Promise.resolve({
-      id: 'chatcmpl-1',
-      object: 'chat.completion',
-      created: 1,
-      model: 'm',
-      choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }),
-    headers: new Headers(),
+    headers: response.headers,
+    body: response.body,
+    json: () => response.clone().json(),
   };
+}
+
+function openAiJsonResponse(): any {
+  return jsonResponse({
+    id: 'chatcmpl-1',
+    object: 'chat.completion',
+    created: 1,
+    model: 'm',
+    choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+  });
 }
 
 function geminiJsonResponse(): any {
-  return {
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve({
-      candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }],
-      usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-    }),
-    headers: new Headers(),
-  };
+  return jsonResponse({
+    candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }],
+    usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+  });
 }
 
 function hordeJsonResponse(): any {
-  return {
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve({
-      id: 'horde-1',
-      object: 'chat.completion',
-      created: 1,
-      model: 'm',
-      choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
-      usage: { kudos: 2 },
-    }),
-    headers: new Headers(),
-  };
+  return jsonResponse({
+    id: 'horde-1',
+    object: 'chat.completion',
+    created: 1,
+    model: 'm',
+    choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
+    usage: { kudos: 2 },
+  });
 }
 
 /** Spy on fetch and hand back the parsed outgoing body. */

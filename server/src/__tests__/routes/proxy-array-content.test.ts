@@ -105,9 +105,7 @@ describe('OpenAI multimodal array content', () => {
         // Sanity check that the array shape made it through to the upstream call.
         const body = JSON.parse(String((init as RequestInit).body));
         expect(Array.isArray(body.messages[0].content)).toBe(true);
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-array', object: 'chat.completion', created: 1, model: 'openai/gpt-oss-120b',
             choices: [{
               index: 0,
@@ -115,8 +113,7 @@ describe('OpenAI multimodal array content', () => {
               finish_reason: 'stop',
             }],
             usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -145,15 +142,12 @@ describe('OpenAI multimodal array content', () => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
         upstream = JSON.parse(String((init as RequestInit).body));
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-upload', object: 'chat.completion', created: 1,
             model: 'meta-llama/llama-4-scout-17b-16e-instruct',
             choices: [{ index: 0, message: { role: 'assistant', content: 'a red square' }, finish_reason: 'stop' }],
             usage: { prompt_tokens: 9, completion_tokens: 3, total_tokens: 12 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -375,14 +369,11 @@ describe('OpenAI multimodal array content', () => {
           // neither may survive normalization.
           expect(body.messages[1]).not.toHaveProperty('tool_calls');
           expect(body.messages[2]).not.toHaveProperty('tool_calls');
-          return {
-            ok: true,
-            json: () => Promise.resolve({
+          return new Response(JSON.stringify({
               id: 'chatcmpl-nulltc', object: 'chat.completion', created: 1, model: 'openai/gpt-oss-120b',
               choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
               usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
-            }),
-          } as any;
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
         }
         return origFetch(url, init);
       });
