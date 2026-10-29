@@ -3,6 +3,7 @@ import { OpenAICompatProvider } from '../../providers/openai-compat.js';
 import { resetTimeoutWarnings } from '../../lib/provider-timeout.js';
 import type { ChatMessage } from '@freellmapi/shared/types.js';
 import type { ChatCompletionChunk } from '@freellmapi/shared/types.js';
+import { MAX_PROVIDER_STREAM_FRAME_BYTES } from '../../providers/response-body.js';
 
 const MESSAGES: ChatMessage[] = [{ role: 'user', content: 'hi' }];
 
@@ -97,6 +98,14 @@ describe('readSseFrames data: prefix (issue #1087)', () => {
     const chunks = await collect(provider.streamChatCompletion('k', MESSAGES, 'm'));
     expect(chunks.map(c => c.choices?.[0]?.delta?.content ?? '')).toContain('hello');
     expect(chunks.some(c => c.choices?.[0]?.finish_reason === 'stop')).toBe(true);
+  });
+
+  it('rejects an oversized upstream SSE chunk before parsing it', async () => {
+    const body = `data: ${'x'.repeat(MAX_PROVIDER_STREAM_FRAME_BYTES + 1)}`;
+    const provider = makeProvider();
+    vi.spyOn(global, 'fetch').mockResolvedValue(sseResponse(body));
+
+    await expect(collect(provider.streamChatCompletion('k', MESSAGES, 'm'))).rejects.toThrow(/exceeded/);
   });
 
   it('throws when the stream ends without [DONE] or finish_reason', async () => {
