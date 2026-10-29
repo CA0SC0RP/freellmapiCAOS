@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CohereProvider } from '../../providers/cohere.js';
+import { MAX_PROVIDER_RESPONSE_BYTES } from '../../providers/response-body.js';
 
 describe('CohereProvider', () => {
   let provider: CohereProvider;
@@ -19,17 +20,14 @@ describe('CohereProvider', () => {
     vi.spyOn(global, 'fetch').mockImplementationOnce(async (url, init) => {
       capturedUrl = String(url);
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'cohere-123',
           object: 'chat.completion',
           created: 123,
           model: 'command-a-03-2025',
           choices: [{ index: 0, message: { role: 'assistant', content: 'Hello from Cohere!' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-        }),
-      } as any;
+        }), { status: 200 }) as any;
     });
 
     const result = await provider.chatCompletion(
@@ -63,14 +61,11 @@ describe('CohereProvider', () => {
     let capturedBody: any = null;
     vi.spyOn(global, 'fetch').mockImplementationOnce(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'c', object: 'chat.completion', created: 1, model: 'command-a',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200 }) as any;
     });
 
     await provider.chatCompletion('k', [{ role: 'user', content: 'Hi' }], 'command-a-03-2025', {
@@ -104,14 +99,11 @@ describe('CohereProvider', () => {
     let capturedBody: any = null;
     vi.spyOn(global, 'fetch').mockImplementationOnce(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'c', object: 'chat.completion', created: 1, model: 'command-a',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200 }) as any;
     });
 
     await provider.chatCompletion('k', [{ role: 'user', content: 'Hi' }], 'command-a-03-2025');
@@ -122,9 +114,7 @@ describe('CohereProvider', () => {
     let capturedBody: any = null;
     vi.spyOn(global, 'fetch').mockImplementationOnce(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'cohere-tool-123',
           object: 'chat.completion',
           created: 123,
@@ -143,8 +133,7 @@ describe('CohereProvider', () => {
             finish_reason: 'tool_calls',
           }],
           usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 },
-        }),
-      } as any;
+        }), { status: 200 }) as any;
     });
 
     const result = await provider.chatCompletion(
@@ -176,6 +165,16 @@ describe('CohereProvider', () => {
       type: 'function',
       function: { name: 'get_weather', arguments: '{"city":"Mexico City"}' },
     }]);
+  });
+
+  it('rejects oversized successful responses before parsing JSON', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response(' '.repeat(MAX_PROVIDER_RESPONSE_BYTES + 1)),
+    );
+
+    await expect(
+      provider.chatCompletion('test-key', [{ role: 'user', content: 'Hi' }], 'command-a-03-2025'),
+    ).rejects.toThrow(/exceeded.*byte limit/);
   });
 
   it('should validate key', async () => {
