@@ -8,7 +8,7 @@ import type {
   TokenUsage,
 } from '@freellmapi/shared/types.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
-import { readProviderResponseJson } from './response-body.js';
+import { MAX_PROVIDER_STREAM_FRAME_BYTES, readProviderResponseJson } from './response-body.js';
 import { contentToString } from '../lib/content.js';
 import { proxyFetch } from '../lib/proxy.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
@@ -728,8 +728,14 @@ export class GoogleProvider extends BaseProvider {
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
+        if (new TextEncoder().encode(buffer).byteLength > MAX_PROVIDER_STREAM_FRAME_BYTES) {
+          throw new Error(`${this.name} stream frame exceeded the ${MAX_PROVIDER_STREAM_FRAME_BYTES}-byte limit`);
+        }
 
         for (const line of lines) {
+          if (new TextEncoder().encode(line).byteLength > MAX_PROVIDER_STREAM_FRAME_BYTES) {
+            throw new Error(`${this.name} stream frame exceeded the ${MAX_PROVIDER_STREAM_FRAME_BYTES}-byte limit`);
+          }
           const trimmed = line.trim();
           // `data:` with or without the space, same as BaseProvider (#1087).
           if (!trimmed || !trimmed.startsWith('data:')) continue;
