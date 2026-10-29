@@ -145,4 +145,38 @@ describe('createPinnedLookup (custom-provider DNS pinning)', () => {
     lookup('api.example.com', { family: 6 }, callback);
     expect(callback.mock.calls[0][0]).toMatchObject({ code: 'EAI_ADDRFAMILY' });
   });
+  
+  it('aborts an in-flight body read and releases the pinned request', async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/plain' });
+      response.write('first');
+      // Keep the response open until the caller aborts.
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('test server did not bind a TCP port');
+    const abort = new AbortController();
+
+    try {
+      const response = await pinnedProviderFetch(
+        `http://api.example.test:${address.port}/abort-during-body`,
+        { method: 'GET', signal: abort.signal },
+        ['127.0.0.1'],
+      );
+      const reader = response.body!.getReader();
+      const first = await reader.read();
+      expect(new TextDecoder().decode(first.value)).toBe('first');
+
+      const pendingRead = reader.read();
+      abort.abort(new Error('test abort during body'));
+      await expect(pendingRead).rejects.toThrow();
+    } finally {
+      server.closeAllConnections();
+      const closed = once(server, 'close');
+      server.close();
+      await closed;
+    }
+  });
+
 });
