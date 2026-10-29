@@ -270,12 +270,11 @@ async function readCapped(response: FetchResponse, limit: number): Promise<strin
   }
 
   const body = response.body;
+  if (body === null) return '';
   if (!body || typeof body.getReader !== 'function') {
-    // A fetch implementation without a readable body (or a stub); fall back to
-    // buffering, and still refuse anything over the ceiling.
-    const text = await response.text();
-    if (text.length > limit) throw new Error('GitHub Atom feed is too large');
-    return text;
+    // Do not call text(): it allocates the full response before the cap can
+    // be enforced. Reject non-streaming adapters instead.
+    throw new Error('GitHub Atom feed response has no readable stream');
   }
 
   const reader = body.getReader();
