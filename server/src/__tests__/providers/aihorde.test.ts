@@ -31,6 +31,12 @@ describe('AIHordeProvider', () => {
           usage: { kudos: 2 }, // AI Horde returns kudos, not token counts
         }),
         headers: { get: () => null },
+        body: new Response(JSON.stringify({
+          id: 'horde-1', object: 'chat.completion', created: 111,
+          model: 'aphrodite/TheDrummer/Skyfall-31B-v4.2',
+          choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+          usage: { kudos: 2 },
+        })).body,
       } as any;
     });
     return captured;
@@ -121,6 +127,7 @@ describe('AIHordeProvider', () => {
       statusText: 'Not Acceptable',
       json: () => Promise.resolve({ detail: 'Error: No user matching sent API Key.' }),
       headers: { get: () => null },
+      body: new Response(JSON.stringify({ detail: 'Error: No user matching sent API Key.' })).body,
     } as any));
     await expect(
       provider.chatCompletion('bad', [{ role: 'user', content: 'hi' }], 'm'),
