@@ -4,6 +4,7 @@ import { contentToString } from '../lib/content.js';
 import { providerTimeoutMs } from '../lib/provider-timeout.js';
 import { resolveMaxTokens } from '../lib/sampling-params.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
+import { readProviderResponseJson, readProviderResponseText } from './response-body.js';
 
 const BASE_URL = 'https://aclide.com/v1';
 
@@ -114,7 +115,7 @@ export class AclideProvider extends BaseProvider {
     this.record(res, 'models', quotaContext);
     if ([401, 403].includes(res.status)) return this.validationResult(res);
     if (!res.ok) throw providerHttpError(res, 'ACLIDE key validation is temporarily inconclusive');
-    const roster = await res.json() as { data?: unknown };
+    const roster = await readProviderResponseJson<{ data?: unknown }>(res);
     if (!Array.isArray(roster.data)) throw upstreamError('returned an invalid model roster');
     return true;
   }
@@ -127,14 +128,14 @@ export class AclideProvider extends BaseProvider {
     this.record(res, 'responses', quotaContext, modelId);
     // Preserve HTTP status/backoff even for a non-JSON error page.
     if (!res.ok) {
-      const body = await res.text();
+      const body = await readProviderResponseText(res);
       let detail: unknown = body;
       try { detail = JSON.parse(body); } catch { /* Keep non-JSON diagnostics. */ }
       // The shared "<name> API error <status>: <text>" wording is what the
       // failover classifier reads; without it a 400 ended the whole chain.
       throw providerHttpError(res, `ACLIDE API error ${res.status}: ${body.slice(0, 500)}`, detail);
     }
-    const response = await res.json() as AclideResponse;
+    const response = await readProviderResponseJson<AclideResponse>(res);
     if (response.model !== modelId) throw upstreamError('returned a different or missing model identity');
     if (!['completed', 'incomplete'].includes(response.status ?? '') || response.error) {
       throw upstreamError(`response failed: ${response.error?.message ?? response.status ?? 'missing status'}`);
