@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createPinnedLookup, pinnedProviderFetch } from '../../lib/pinned-provider-fetch.js';
 import { assertProviderUrlAllowed } from '../../lib/url-guard.js';
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 describe('createPinnedLookup (custom-provider DNS pinning)', () => {
   it('returns only the addresses vetted for the request and never resolves again', () => {
     const lookup = createPinnedLookup('api.example.com', ['93.184.216.34']);
@@ -48,6 +50,65 @@ describe('createPinnedLookup (custom-provider DNS pinning)', () => {
         url: '/pinned-check',
       });
     } finally {
+      server.close();
+      await once(server, 'close');
+    }
+  });
+
+  it('bounds the lifetime when the caller abandons the response before reading its body', async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/plain' });
+      response.write('first chunk');
+      // Intentionally keep the upstream response open.
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('test server did not bind a TCP port');
+
+    try {
+      const response = await pinnedProviderFetch(
+        `http://api.example.test:${address.port}/abandoned`,
+        { method: 'GET' },
+        ['127.0.0.1'],
+        25,
+      );
+      await delay(60);
+      const reader = response.body!.getReader();
+      await expect(reader.read()).rejects.toThrow(/idle lease expired/);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+      await once(server, 'close');
+    }
+  });
+
+  it('does not expire a stream while the consumer is actively waiting for the next chunk', async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/plain' });
+      response.write('first');
+      setTimeout(() => response.end('second'), 70);
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('test server did not bind a TCP port');
+
+    try {
+      const response = await pinnedProviderFetch(
+        `http://api.example.test:${address.port}/active-stream`,
+        { method: 'GET' },
+        ['127.0.0.1'],
+        25,
+      );
+      const reader = response.body!.getReader();
+      const first = await reader.read();
+      expect(new TextDecoder().decode(first.value)).toBe('first');
+      const second = await reader.read();
+      expect(new TextDecoder().decode(second.value)).toBe('second');
+      expect((await reader.read()).done).toBe(true);
+    } finally {
+      server.closeAllConnections();
       server.close();
       await once(server, 'close');
     }
