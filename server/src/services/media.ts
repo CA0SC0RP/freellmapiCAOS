@@ -545,12 +545,27 @@ async function callHuggingFaceVideo(
     throw new MediaError('huggingface returned no video job id', 502);
   }
 
-  // Hugging Face's fal router returns a fal queue response URL. Only reuse its
-  // path; all polling stays on router.huggingface.co so the HF token is never
-  // sent to an arbitrary host supplied in an upstream JSON body.
+  // Validate upstream job metadata before using it to build authenticated poll URLs.
   let responsePath: string;
   try {
-    responsePath = new URL(queue.response_url, 'https://queue.fal.run').pathname;
+    const responseUrl = new URL(queue.response_url);
+    const modelPath = providerModelId.startsWith('fal-ai/')
+      ? providerModelId.slice('fal-ai/'.length)
+      : providerModelId;
+    if (
+      responseUrl.protocol !== 'https:' ||
+      responseUrl.hostname !== 'queue.fal.run' ||
+      responseUrl.port !== '' ||
+      responseUrl.username !== '' ||
+      responseUrl.password !== '' ||
+      responseUrl.search !== '' ||
+      responseUrl.hash !== '' ||
+      !/^[A-Za-z0-9_-]+$/.test(queue.request_id) ||
+      responseUrl.pathname !== `/fal-ai/${modelPath}/requests/${queue.request_id}`
+    ) {
+      throw new Error('unexpected queue URL');
+    }
+    responsePath = responseUrl.pathname;
   } catch {
     throw new MediaError('huggingface returned an invalid video job URL', 502);
   }
