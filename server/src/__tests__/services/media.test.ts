@@ -465,7 +465,7 @@ describe('media service', () => {
       globalThis.fetch = fetchMock as any;
 
       await expect(runVideoGeneration('Lightricks/LTX-Video-0.9.5', { prompt: 'x' }))
-        .rejects.toThrow(/private address/);
+        .rejects.toThrow(/cloud metadata address|private address/);
       // Submit + result read only; the metadata address was never contacted.
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
