@@ -202,11 +202,7 @@ describe('POST /v1/completions', () => {
             controller.close();
           },
         });
-        return {
-          ok: true,
-          headers: new Headers(),
-          body: stream,
-        } as any;
+        return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) as any;
       }
       return origFetch(url, init);
     });
