@@ -478,16 +478,11 @@ describe('Model management API', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const u = typeof url === 'string' ? url : url.toString();
       if (u.includes('api.groq.com')) {
-        return {
-          ok: true,
-          status: 200,
-          headers: new Headers(),
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-chain', object: 'chat.completion', created: 1, model: 'named-chain-routed',
             choices: [{ index: 0, message: { role: 'assistant', content: 'routed via route-group' }, finish_reason: 'stop' }],
             usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
@@ -520,16 +515,11 @@ describe('Model management API', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const u = typeof url === 'string' ? url : url.toString();
       if (u.includes('api.groq.com')) {
-        return {
-          ok: true,
-          status: 200,
-          headers: new Headers(),
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-chain', object: 'chat.completion', created: 1, model: modelId,
             choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
             usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });

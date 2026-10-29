@@ -205,9 +205,7 @@ describe('Virtual "auto" model', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-auto',
             object: 'chat.completion',
             created: 123,
@@ -218,8 +216,7 @@ describe('Virtual "auto" model', () => {
               finish_reason: 'stop',
             }],
             usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });

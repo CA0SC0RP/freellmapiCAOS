@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GoogleProvider } from '../../providers/google.js';
 import { isStreamTruncatedError } from '../../lib/error-classify.js';
+import { MAX_PROVIDER_STREAM_FRAME_BYTES } from '../../providers/response-body.js';
 
 describe('GoogleProvider', () => {
   let provider: GoogleProvider;
@@ -28,10 +29,7 @@ describe('GoogleProvider', () => {
       },
     };
 
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockResponse),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(mockResponse), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
     const result = await provider.chatCompletion(
       'test-key',
@@ -48,13 +46,10 @@ describe('GoogleProvider', () => {
   });
 
   it('converts an image_url data URL into a Gemini inlineData part (#118)', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         candidates: [{ content: { parts: [{ text: 'a cat' }] }, finishReason: 'STOP' }],
         usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-      }),
-    } as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
 
     await provider.chatCompletion('test-key', [
       { role: 'user', content: [
@@ -70,12 +65,7 @@ describe('GoogleProvider', () => {
   });
 
   it('should throw on API error', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: false,
-      status: 429,
-      statusText: 'Too Many Requests',
-      json: () => Promise.resolve({ error: { message: 'Rate limit exceeded' } }),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Rate limit exceeded' } }), { status: 429, statusText: 'Too Many Requests', headers: { 'Content-Type': 'application/json' } }));
 
     await expect(
       provider.chatCompletion('test-key', [{ role: 'user', content: 'Hi' }], 'gemini-2.5-pro')
@@ -123,18 +113,14 @@ describe('GoogleProvider', () => {
   // #268: Google reports a bad key as HTTP 400 INVALID_ARGUMENT / API_KEY_INVALID,
   // not 401/403. A confirmed-bad key must return false (→ auto-disable counter).
   it('validateKey returns false for a genuinely invalid key (HTTP 400 API_KEY_INVALID)', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: false,
-      status: 400,
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         error: {
           code: 400,
           message: 'API key not valid. Please pass a valid API key.',
           status: 'INVALID_ARGUMENT',
           details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'API_KEY_INVALID' }],
         },
-      }),
-    } as any);
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } }) as any);
     expect(await provider.validateKey('bad-key')).toMatchObject({ valid: false });
   });
 
@@ -143,18 +129,14 @@ describe('GoogleProvider', () => {
   // may still work for generateContent elsewhere — validateKey throws so health.ts
   // records status='error' instead of incrementing the disable counter.
   it('validateKey throws (does not return false) on a permission/region 403', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: false,
-      status: 403,
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         error: {
           code: 403,
           message: 'Generative Language API has not been used in project before or it is disabled.',
           status: 'PERMISSION_DENIED',
           details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'SERVICE_DISABLED' }],
         },
-      }),
-    } as any);
+      }), { status: 403, headers: { 'Content-Type': 'application/json' } }) as any);
     await expect(provider.validateKey('region-blocked-key')).rejects.toThrow(/inconclusive/i);
   });
 
@@ -162,13 +144,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -193,13 +172,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -244,7 +220,7 @@ describe('GoogleProvider', () => {
           controller.close();
         },
       });
-      return { ok: true, body: stream } as any;
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) as any;
     });
 
     const chunks: any[] = [];
@@ -303,13 +279,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'Sunny, 31C.' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -354,9 +327,7 @@ describe('GoogleProvider', () => {
   });
 
   it('does not expose Gemini thought parts as visible content (#539)', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         candidates: [{
           content: {
             parts: [
@@ -367,8 +338,7 @@ describe('GoogleProvider', () => {
           finishReason: 'STOP',
         }],
         usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 2, totalTokenCount: 3 },
-      }),
-    } as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any);
 
     const result = await provider.chatCompletion(
       'test-key',
@@ -384,13 +354,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -426,13 +393,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'grounded answer' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -451,13 +415,10 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -478,9 +439,7 @@ describe('GoogleProvider', () => {
   });
 
   it('should translate Gemini functionCall response to OpenAI tool_calls', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
         candidates: [{
           content: {
             parts: [{
@@ -498,8 +457,7 @@ describe('GoogleProvider', () => {
           candidatesTokenCount: 3,
           totalTokenCount: 15,
         },
-      }),
-    } as any);
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any);
 
     const result = await provider.chatCompletion(
       'test-key',
@@ -518,9 +476,7 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{
             content: {
               parts: [{
@@ -535,8 +491,7 @@ describe('GoogleProvider', () => {
             finishReason: 'STOP',
           }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     // 1. Check extraction
@@ -578,9 +533,7 @@ describe('GoogleProvider', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBodies.push(JSON.parse((init as any).body));
       if (capturedBodies.length === 1) {
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             candidates: [{
               content: {
                 parts: [{
@@ -595,16 +548,12 @@ describe('GoogleProvider', () => {
               finishReason: 'STOP',
             }],
             usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'Cold and windy.' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -644,16 +593,13 @@ describe('GoogleProvider', () => {
     let capturedBody: any;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{
             content: { parts: [{ text: 'ok' }] },
             finishReason: 'STOP',
           }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -692,7 +638,7 @@ describe('GoogleProvider', () => {
         controller.close();
       },
     });
-    return { ok: true, body: stream };
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
   }
 
   async function collect<T>(gen: AsyncGenerator<T>): Promise<T[]> {
@@ -700,6 +646,18 @@ describe('GoogleProvider', () => {
     for await (const c of gen) out.push(c);
     return out;
   }
+
+  it('rejects an oversized Gemini upstream stream chunk before parsing it', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(sseResponse([
+      `data: ${'x'.repeat(MAX_PROVIDER_STREAM_FRAME_BYTES + 1)}`,
+    ]));
+
+    await expect(collect(provider.streamChatCompletion(
+      'test-key',
+      [{ role: 'user', content: 'Hi' }],
+      'gemini-2.5-pro',
+    ))).rejects.toThrow(/exceeded/);
+  });
 
   it('streams text deltas and emits a final stop chunk', async () => {
     vi.spyOn(global, 'fetch').mockResolvedValueOnce(sseResponse([
@@ -828,13 +786,10 @@ describe('GoogleProvider', () => {
     const captured: { signal?: AbortSignal } = {};
     global.fetch = (async (_url: any, init: any) => {
       captured.signal = init?.signal;
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     }) as any;
     return { signal: captured as any, restored: () => { global.fetch = origFetch; } };
   }

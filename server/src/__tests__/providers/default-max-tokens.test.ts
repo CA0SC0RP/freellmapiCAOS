@@ -10,18 +10,14 @@ import { defaultMaxTokensFor, resolveMaxTokens } from '../../lib/sampling-params
 // the client omitted the parameter.
 
 function jsonResponse(): any {
-  return {
-    ok: true,
-    json: () => Promise.resolve({
+  return new Response(JSON.stringify({
       id: 'chatcmpl-1',
       object: 'chat.completion',
       created: 1,
       model: 'm',
       choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }),
-    headers: new Headers(),
-  };
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
 }
 
 function sseResponse(): any {

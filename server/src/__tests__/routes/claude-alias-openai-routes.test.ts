@@ -76,16 +76,11 @@ function mockUpstream() {
   vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
     const u = typeof url === 'string' ? url : url.toString();
     if (u.includes('api.groq.com')) {
-      return {
-        ok: true,
-        status: 200,
-        headers: new Headers(),
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'chatcmpl-x', object: 'chat.completion', created: 1, model: 'default',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     }
     return origFetch(url, init);
   });

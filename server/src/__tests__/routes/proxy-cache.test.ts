@@ -72,17 +72,14 @@ function mockGroq(content: string, streamOpts: { finish?: string; failMidStream?
         return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) as any;
       }
       counter.calls++;
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'chatcmpl-cache-it',
           object: 'chat.completion',
           created: 123,
           model: 'openai/gpt-oss-120b',
           choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     }
     return origFetch(url, init);
   });
