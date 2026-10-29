@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readProviderResponseText, readProviderResponseJson, MAX_PROVIDER_RESPONSE_BYTES } from '../../providers/response-body.js';
+import { readProviderResponseText, readProviderResponseJson, MAX_PROVIDER_RESPONSE_BYTES, MAX_PROVIDER_STREAM_FRAME_BYTES, assertProviderStreamChunkWithinLimit } from '../../providers/response-body.js';
 
 describe('provider response body size limits', () => {
   it('rejects a response whose Content-Length exceeds the cap', async () => {
@@ -26,8 +26,13 @@ describe('provider response body size limits', () => {
 
 
 describe('provider streaming frame limits', () => {
-  it('defines a bounded frame size for SSE readers', async () => {
-    const { MAX_PROVIDER_STREAM_FRAME_BYTES } = await import('../../providers/response-body.js');
-    expect(MAX_PROVIDER_STREAM_FRAME_BYTES).toBe(2 * 1024 * 1024);
+  it('rejects a transport chunk larger than the frame cap before decoding', () => {
+    expect(() => assertProviderStreamChunkWithinLimit(new Uint8Array(MAX_PROVIDER_STREAM_FRAME_BYTES + 1)))
+      .toThrow(/stream chunk exceeded/);
+  });
+
+  it('accepts a transport chunk within the frame cap', () => {
+    expect(() => assertProviderStreamChunkWithinLimit(new Uint8Array(MAX_PROVIDER_STREAM_FRAME_BYTES)))
+      .not.toThrow();
   });
 });
