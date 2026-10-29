@@ -8,7 +8,7 @@ import type {
   TokenUsage,
 } from '@freellmapi/shared/types.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
-import { MAX_PROVIDER_STREAM_FRAME_BYTES, assertProviderStreamChunkWithinLimit, readProviderResponseJson } from './response-body.js';
+import { MAX_PROVIDER_STREAM_FRAME_BYTES, assertProviderStreamChunkWithinLimit, readProviderResponseBytes, readProviderResponseJson } from './response-body.js';
 import { contentToString } from '../lib/content.js';
 import { proxyFetch } from '../lib/proxy.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
@@ -367,8 +367,8 @@ async function imageUrlToInlineData(url: string): Promise<{ mimeType: string; da
       // an image host stalls; classify as `image` for triage.
       const res = await proxyFetch(url, { signal: AbortSignal.timeout(30_000) }, 'google', 'image', 30_000);
       if (!res.ok) return null;
-      const buf = Buffer.from(await res.arrayBuffer());
-      if (buf.length === 0 || buf.length > MAX_IMAGE_BYTES) return null;
+      const buf = Buffer.from(await readProviderResponseBytes(res, MAX_IMAGE_BYTES));
+      if (buf.length === 0) return null;
       const mimeType = res.headers.get('content-type')?.split(';')[0]?.trim() || 'image/jpeg';
       return { mimeType, data: buf.toString('base64') };
     } catch {
