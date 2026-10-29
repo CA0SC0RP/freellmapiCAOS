@@ -14,15 +14,11 @@ describe('keyless bearer handling (#1331)', () => {
   function okFetch(capture: { headers?: Record<string, string> }): void {
     vi.spyOn(global, 'fetch').mockImplementation((async (_url: any, init: any) => {
       capture.headers = (init as any).headers;
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'x', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-        headers: new Headers(),
-      };
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;;
     }) as any);
   }
 
