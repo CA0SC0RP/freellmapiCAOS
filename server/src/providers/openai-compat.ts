@@ -465,9 +465,7 @@ export class OpenAICompatProvider extends BaseProvider {
       // sending JSON (Content-Type: application/json). Without that hint,
       // the parser is more likely choking on NDJSON, native API output, or
       // HTML — all "wrong endpoint" cases. This is the safe default.
-      const looksTruncated =
-        /Unexpected end of JSON input/.test(msg) ||
-        (/Unexpected non-whitespace character after JSON at position/.test(msg) && looksLikeJson && !looksLikeNdjson);
+      const looksTruncated = /Unexpected end of JSON input/.test(msg);
       if (looksTruncated) {
         throw new Error(
           `${this.name} returned 200 but the response body was truncated mid-stream ` +
