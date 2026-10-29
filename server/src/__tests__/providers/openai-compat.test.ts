@@ -50,17 +50,14 @@ describe('OpenAICompatProvider', () => {
       capturedUrl = url as string;
       capturedHeaders = (init as any).headers;
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'test-id',
           object: 'chat.completion',
           created: 123,
           model: 'test-model',
           choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion('my-key', [{ role: 'user', content: 'test' }], 'test-model');
@@ -81,17 +78,14 @@ describe('OpenAICompatProvider', () => {
       let captured: any = null;
       vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
         captured = JSON.parse((init as any).body);
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'test-id',
             object: 'chat.completion',
             created: 123,
             model: 'test-model',
             choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
             usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       });
       return { body: () => captured };
     }
@@ -211,17 +205,14 @@ describe('OpenAICompatProvider', () => {
     let capturedBody: any = null;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'test-id',
           object: 'chat.completion',
           created: 123,
           model: 'test-model',
           choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [] }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -485,14 +476,11 @@ describe('OpenAICompatProvider', () => {
     let body: any = null;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       body = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'id', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     const mistral = new OpenAICompatProvider({ platform: 'mistral', name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1' });
@@ -525,14 +513,11 @@ describe('OpenAICompatProvider', () => {
     let body: any = null;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       body = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'id', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     const groq = new OpenAICompatProvider({ platform: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1' });
@@ -555,14 +540,11 @@ describe('OpenAICompatProvider', () => {
     let body: any = null;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       body = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'id', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     const cerebras = new OpenAICompatProvider({ platform: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1' });
@@ -705,14 +687,11 @@ describe('OpenAICompatProvider - platform instances', () => {
       let capturedUrl = '';
       vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
         capturedUrl = url as string;
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'id', object: 'chat.completion', created: 1, model: 'm',
             choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
             usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       });
 
       const result = await provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model');
@@ -730,15 +709,11 @@ describe('OpenAICompatProvider - platform instances', () => {
     let body: Record<string, unknown> = {};
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       body = JSON.parse(String((init as RequestInit).body));
-      return {
-        ok: true,
-        headers: new Headers(),
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'id', object: 'chat.completion', created: 1, model: 'mistral/leanstral-1-5',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -1293,14 +1268,11 @@ describe('OpenCode session header (#1639)', () => {
   function upstream() {
     return vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       (global as any).__lastHeaders = (init as any).headers;
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'x', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
   }
 
@@ -1334,14 +1306,11 @@ describe('OpenCode session header (#1639)', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       (global as any).__lastHeaders = (init as any).headers;
       const stream = new ReadableStream<Uint8Array>({ start(c) { for (const f of frames) c.enqueue(encoder.encode(f)); c.close(); } });
-      return {
-        ok: true, body: stream, headers: new Headers(),
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'x', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
     const zen = new OpenAICompatProvider({ platform: 'custom', name: 'OpenCode Go', baseUrl: 'https://zen.opencode.ai/v1' });
     for await (const _chunk of zen.streamChatCompletion('k', [{ role: 'user', content: 'hi' }], 'm')) { /* drain */ }
@@ -1356,7 +1325,7 @@ describe('OpenCode session header (#1639)', () => {
     const zen = new OpenAICompatProvider({ platform: 'custom', name: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1' });
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       (global as any).__lastHeaders = (init as any).headers;
-      return { ok: true, status: 200, headers: new Headers(), json: () => Promise.resolve({ data: [] }) } as any;
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
     await zen.validateKey?.('k');
     if ((global as any).__lastHeaders) {
