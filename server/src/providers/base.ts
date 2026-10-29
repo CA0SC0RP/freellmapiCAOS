@@ -510,6 +510,13 @@ export abstract class BaseProvider {
         awaitingFirstByte = false;
         if (done) break;
 
+        // Reject oversized transport chunks before decoding/concatenating them.
+        // This conservatively bounds transient string allocation as well as the
+        // pending line buffer; compliant providers normally emit small SSE chunks.
+        if (value.byteLength > MAX_PROVIDER_STREAM_FRAME_BYTES ||
+            new TextEncoder().encode(buffer).byteLength + value.byteLength > MAX_PROVIDER_STREAM_FRAME_BYTES) {
+          throw new Error(`${this.name} stream frame exceeded the ${MAX_PROVIDER_STREAM_FRAME_BYTES}-byte limit`);
+        }
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
