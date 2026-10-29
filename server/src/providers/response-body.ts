@@ -49,7 +49,9 @@ export async function readProviderResponseText(
     throw new Error('Provider response has no readable stream; refusing an unbounded body read');
   }
 
-  const chunks: Uint8Array[] = [];
+  // Grow one bounded buffer instead of retaining every chunk and then
+  // allocating a second full-size copy at the end.
+  let bytes = new Uint8Array(Math.min(maxBytes, 64 * 1024));
   let total = 0;
   try {
     while (true) {
@@ -58,11 +60,18 @@ export async function readProviderResponseText(
       if (!isUint8ArrayView(value)) {
         throw new Error('Provider response stream returned an invalid chunk');
       }
-      total += value.byteLength;
-      if (total > maxBytes) {
+      const nextTotal = total + value.byteLength;
+      if (nextTotal > maxBytes) {
         throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
       }
-      chunks.push(value);
+      if (nextTotal > bytes.byteLength) {
+        const capacity = Math.min(maxBytes, Math.max(nextTotal, bytes.byteLength * 2));
+        const grown = new Uint8Array(capacity);
+        grown.set(bytes.subarray(0, total));
+        bytes = grown;
+      }
+      bytes.set(value, total);
+      total = nextTotal;
     }
   } catch (error) {
     // Cancel on every failed read/validation path so upstream work does not
@@ -73,13 +82,7 @@ export async function readProviderResponseText(
     reader.releaseLock();
   }
 
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
+  return new TextDecoder().decode(bytes.subarray(0, total));
 }
 
 /** Read bounded binary response bytes without first allocating the entire upstream body. */
@@ -101,16 +104,25 @@ export async function readProviderResponseBytes(
     throw new Error('Provider response has no readable stream; refusing an unbounded body read');
   }
 
-  const chunks: Uint8Array[] = [];
+  // Keep only one bounded accumulation buffer; retaining all chunks and
+  // concatenating afterward can nearly double peak memory for large media.
+  let bytes = new Uint8Array(Math.min(maxBytes, 64 * 1024));
   let total = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       if (!isUint8ArrayView(value)) throw new Error('Provider response stream returned an invalid chunk');
-      total += value.byteLength;
-      if (total > maxBytes) throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
-      chunks.push(value);
+      const nextTotal = total + value.byteLength;
+      if (nextTotal > maxBytes) throw new Error(`Provider response exceeded the ${maxBytes}-byte limit`);
+      if (nextTotal > bytes.byteLength) {
+        const capacity = Math.min(maxBytes, Math.max(nextTotal, bytes.byteLength * 2));
+        const grown = new Uint8Array(capacity);
+        grown.set(bytes.subarray(0, total));
+        bytes = grown;
+      }
+      bytes.set(value, total);
+      total = nextTotal;
     }
   } catch (error) {
     try { await reader.cancel(); } catch { /* already closed or cancelled */ }
@@ -119,13 +131,7 @@ export async function readProviderResponseBytes(
     reader.releaseLock();
   }
 
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
+  return bytes.subarray(0, total);
 }
 
 /** Parse bounded JSON from an upstream provider without unbounded json() fallback reads. */
