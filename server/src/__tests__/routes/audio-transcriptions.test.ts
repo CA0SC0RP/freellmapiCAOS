@@ -119,6 +119,27 @@ describe('POST /v1/audio/transcriptions', () => {
     expect(body.error.message).toContain('file');
   });
 
+  it('400 when multipart field count exceeds the limit', async () => {
+    const fields = Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`extra_${i}`, 'x']));
+    const { status, body } = await postTranscription(app, {
+      file: { bytes: AUDIO, name: 'a.wav' },
+      fields,
+    });
+    expect(status).toBe(400);
+    expect(body.error.type).toBe('invalid_request_error');
+    expect(body.error.message).toContain('Malformed multipart');
+  });
+
+  it('400 when a multipart text field exceeds the limit', async () => {
+    const { status, body } = await postTranscription(app, {
+      file: { bytes: AUDIO, name: 'a.wav' },
+      fields: { prompt: 'x'.repeat(64 * 1024 + 1) },
+    });
+    expect(status).toBe(400);
+    expect(body.error.type).toBe('invalid_request_error');
+    expect(body.error.message).toContain('Malformed multipart');
+  });
+
   it('400 when model is missing', async () => {
     const { status, body } = await postTranscription(app, {
       file: { bytes: AUDIO, name: 'a.wav' },
