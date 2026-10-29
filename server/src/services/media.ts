@@ -109,6 +109,21 @@ const activeMediaRequests: Record<MediaCapacity, number> = {
 
 let activeMediaTotal = 0;
 
+let activeTranscriptionUploads = 0;
+
+/** Reserve memory capacity before Multer buffers a transcription upload. */
+export function acquireTranscriptionUploadSlot(): (() => void) | null {
+  const limit = mediaConcurrencyLimit('MEDIA_MAX_CONCURRENT_TRANSCRIPTION_UPLOADS', 2);
+  if (activeTranscriptionUploads >= limit) return null;
+  activeTranscriptionUploads += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeTranscriptionUploads -= 1;
+  };
+}
+
 function mediaConcurrencyLimit(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === '') return fallback;
