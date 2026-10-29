@@ -96,8 +96,8 @@ export interface VideoResult {
   video: Buffer;
   contentType: string;
 }
-export interface ImageParams { prompt: string; n?: number; size?: string }
-export interface SpeechParams { input: string; voice?: string; format?: string }
+export interface ImageParams { prompt: string; n?: number; size?: string; signal?: AbortSignal }
+export interface SpeechParams { input: string; voice?: string; format?: string; signal?: AbortSignal }
 export interface VideoParams {
   prompt: string;
   duration?: number;
@@ -371,6 +371,8 @@ async function callImageProvider(
   p: ImageParams,
 ): Promise<Array<{ b64_json?: string; url?: string }>> {
   const key = credential.key;
+  const fetchForClient = (url: string, platform: string, modality: MediaModality, init: RequestInit) =>
+    mediaFetch(url, platform, modality, init, FETCH_TIMEOUT_MS, p.signal);
   const [w, h] = parseSize(p.size);
   switch (row.platform) {
     case 'plugsky': {
@@ -379,7 +381,7 @@ async function callImageProvider(
       if (!['plugsky-flux', 'dall-e-3'].includes(row.model_id)) {
         throw new MediaError('Plugsky requires a verified free image route', 400);
       }
-      const r = await mediaFetch(`${PLUGSKY_BASE_URL}/images/generations`, 'plugsky', 'image', {
+      const r = await fetchForClient(`${PLUGSKY_BASE_URL}/images/generations`, 'plugsky', 'image', {
         method: 'POST', redirect: 'error',
         headers: { 'Content-Type': 'application/json', ...bearerAuthHeader(key) },
         body: JSON.stringify({ model: row.model_id, prompt: p.prompt, n: p.n ?? 1,
@@ -394,7 +396,7 @@ async function callImageProvider(
     }
     case 'kenari': {
       requireKenariFreeModel(row.model_id);
-      const r = await mediaFetch(`${KENARI_BASE_URL}/images/generations`, 'kenari', 'image', {
+      const r = await fetchForClient(`${KENARI_BASE_URL}/images/generations`, 'kenari', 'image', {
         method: 'POST',
         redirect: 'error',
         headers: { 'Content-Type': 'application/json', ...bearerAuthHeader(key) },
@@ -413,7 +415,7 @@ async function callImageProvider(
       const body: Record<string, unknown> = { model: row.model_id, prompt: p.prompt };
       if (p.n !== undefined) body.n = p.n;
       if (p.size) body.size = p.size;
-      const r = await mediaFetch(`${credential.baseUrl}/images/generations`, 'custom', 'image', {
+      const r = await fetchForClient(`${credential.baseUrl}/images/generations`, 'custom', 'image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...bearerAuthHeader(key) },
         body: JSON.stringify(body),
@@ -445,7 +447,7 @@ async function callImageProvider(
         default:
           body = { prompt: p.prompt, mode: 'base', steps: 4, width: w, height: h };
       }
-      const r = await mediaFetch(`https://ai.api.nvidia.com/v1/genai/${row.model_id}`, 'nvidia', 'image', {
+      const r = await fetchForClient(`https://ai.api.nvidia.com/v1/genai/${row.model_id}`, 'nvidia', 'image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify(body),
@@ -456,7 +458,7 @@ async function callImageProvider(
     case 'pollinations': {
       // Keyless GET image endpoint returns raw image bytes.
       const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(p.prompt)}?width=${w}&height=${h}&nologo=true&model=${encodeURIComponent(row.model_id)}`;
-      const r = await mediaFetch(url, 'pollinations', 'image', { method: 'GET' });
+      const r = await fetchForClient(url, 'pollinations', 'image', { method: 'GET' });
       const buf = bufferView(await readProviderResponseBytes(r, MAX_IMAGE_RESPONSE_BYTES));
       return [{ b64_json: buf.toString('base64') }];
     }
@@ -486,7 +488,7 @@ async function callImageProvider(
           body: JSON.stringify(body),
         };
       }
-      const r = await mediaFetch(url, 'cloudflare', 'image', init);
+      const r = await fetchForClient(url, 'cloudflare', 'image', init);
       // FLUX returns JSON { result: { image: <b64> } }; SDXL returns raw PNG bytes.
       const ct = r.headers.get('content-type') ?? '';
       if (ct.includes('application/json')) {
@@ -499,7 +501,7 @@ async function callImageProvider(
       return [{ b64_json: buf.toString('base64') }];
     }
     case 'siliconflow': {
-      const r = await mediaFetch('https://api.siliconflow.com/v1/images/generations', 'siliconflow', 'image', {
+      const r = await fetchForClient('https://api.siliconflow.com/v1/images/generations', 'siliconflow', 'image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify({ model: row.model_id, prompt: p.prompt, image_size: `${w}x${h}` }),
@@ -660,6 +662,8 @@ async function callSpeechProvider(
   p: SpeechParams,
 ): Promise<{ audio: Buffer; contentType: string }> {
   const key = credential.key;
+  const fetchForClient = (url: string, platform: string, modality: MediaModality, init: RequestInit) =>
+    mediaFetch(url, platform, modality, init, FETCH_TIMEOUT_MS, p.signal);
   switch (row.platform) {
     case 'freeai': {
       if (!key) throw new MediaError('Free.ai API key required', 401);
@@ -667,7 +671,7 @@ async function callSpeechProvider(
       if (p.format && p.format !== 'wav') throw new MediaError('Free.ai Kokoro supports wav output through this adapter', 400);
       const standardVoices = new Set(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar']);
       const voice = !p.voice || standardVoices.has(p.voice.toLowerCase()) ? 'af_heart' : p.voice;
-      const r = await mediaFetch(`${FREEAI_BASE_URL}/v1/tts/`, 'freeai', 'audio', {
+      const r = await fetchForClient(`${FREEAI_BASE_URL}/v1/tts/`, 'freeai', 'audio', {
         method: 'POST', redirect: 'error',
         headers: { 'Content-Type': 'application/json', ...bearerAuthHeader(key) },
         body: JSON.stringify({ model: row.model_id, text: p.input, voice }),
@@ -683,7 +687,7 @@ async function callSpeechProvider(
       if (!url) throw new MediaError('Free.ai returned a missing or unsafe audio URL', 502);
       // Output is public on the same fixed host. Never forward the credential,
       // follow redirects or download arbitrary URLs supplied by an upstream.
-      const output = await mediaFetch(url, 'freeai', 'audio', { method: 'GET', redirect: 'error' });
+      const output = await fetchForClient(url, 'freeai', 'audio', { method: 'GET', redirect: 'error' });
       const maxBytes = 20 * 1024 * 1024;
       if (!output.body) {
         throw new MediaError('Free.ai speech output is missing', 502);
@@ -713,7 +717,7 @@ async function callSpeechProvider(
       }
       const standardVoices = new Set(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar']);
       const voice = !p.voice || standardVoices.has(p.voice.toLowerCase()) ? 'alec' : p.voice;
-      const r = await mediaFetch(`${SPEECHIFY_BASE_URL}/audio/speech`, 'speechify', 'audio', {
+      const r = await fetchForClient(`${SPEECHIFY_BASE_URL}/audio/speech`, 'speechify', 'audio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}`, 'Speechify-Version': SPEECHIFY_VERSION },
         body: JSON.stringify({ model: row.model_id, input: p.input, voice_id: voice, audio_format: fmt }),
@@ -737,7 +741,7 @@ async function callSpeechProvider(
       const defaultVoice = row.model_id === 'humain-tts' ? 'sara'
         : row.model_id.startsWith('gemini-') ? 'Kore' : 'alloy';
       const voice = !p.voice || p.voice === 'alloy' ? defaultVoice : p.voice;
-      const r = await mediaFetch(`${ELECTRONHUB_BASE_URL}/audio/speech`, 'electronhub', 'audio', {
+      const r = await fetchForClient(`${ELECTRONHUB_BASE_URL}/audio/speech`, 'electronhub', 'audio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...bearerAuthHeader(key) },
         body: JSON.stringify({ model: row.model_id, input: p.input, voice, response_format: format }),
@@ -756,7 +760,7 @@ async function callSpeechProvider(
       const body: Record<string, unknown> = { model: row.model_id, input: p.input };
       if (p.voice) body.voice = p.voice;
       if (p.format) body.response_format = p.format;
-      const r = await mediaFetch(`${credential.baseUrl}/audio/speech`, 'custom', 'audio', {
+      const r = await fetchForClient(`${credential.baseUrl}/audio/speech`, 'custom', 'audio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...bearerAuthHeader(key) },
         body: JSON.stringify(body),
@@ -768,7 +772,7 @@ async function callSpeechProvider(
     }
     case 'cloudflare': {
       const { accountId, token } = parseCfKey(key);
-      const r = await mediaFetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${row.model_id}`, 'cloudflare', 'audio', {
+      const r = await fetchForClient(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${row.model_id}`, 'cloudflare', 'audio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         // MeloTTS has a language selector, not a voice selector. In particular,
@@ -782,7 +786,7 @@ async function callSpeechProvider(
     }
     case 'siliconflow': {
       const fmt = p.format ?? 'mp3';
-      const r = await mediaFetch('https://api.siliconflow.com/v1/audio/speech', 'siliconflow', 'audio', {
+      const r = await fetchForClient('https://api.siliconflow.com/v1/audio/speech', 'siliconflow', 'audio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify({
@@ -798,7 +802,7 @@ async function callSpeechProvider(
       // OpenAI-shaped chat-completions with the audio modality returns b64 audio.
       // The anonymous tier needs no key; only send one when it's a real sk_ token.
       const realKey = key && key.startsWith('sk_') ? key : null;
-      const r = await mediaFetch('https://gen.pollinations.ai/v1/chat/completions', 'pollinations', 'audio', {
+      const r = await fetchForClient('https://gen.pollinations.ai/v1/chat/completions', 'pollinations', 'audio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(realKey ? { Authorization: `Bearer ${realKey}` } : {}) },
         body: JSON.stringify({
@@ -816,7 +820,7 @@ async function callSpeechProvider(
     case 'google': {
       // Older Gemini TTS returns PCM; newer models return an entire WAV file.
       // Preserve WAV bytes instead of wrapping the container a second time.
-      const r = await mediaFetch(
+      const r = await fetchForClient(
         `https://generativelanguage.googleapis.com/v1beta/models/${row.model_id}:generateContent`,
         'google',
         'audio',
@@ -915,6 +919,7 @@ export async function runImageGeneration(model: string | undefined, params: Imag
   // Only a chain rate limited end to end earns a Retry-After (the soonest).
   const hints = new RetryHintTracker();
   for (const row of chain) {
+    throwIfClientGone(params.signal);
     const { credential, budgetBlocked } = KEYLESS_CAPABLE.has(row.platform)
       ? { credential: { id: null, key: null, baseUrl: null, release: () => {} }, budgetBlocked: false }
       : reserveProviderCredential(row, 0);
@@ -934,6 +939,7 @@ export async function runImageGeneration(model: string | undefined, params: Imag
       logMedia(row, credential.id, 'success', Date.now() - started, null);
       return { platform: row.platform, modelId: row.model_id, images };
     } catch (err: any) {
+      if (params.signal?.aborted) throw new MediaError('client closed the request', 499);
       const e = err instanceof MediaError ? err : new MediaError(String(err?.message ?? err), 502);
       logMedia(row, credential.id, 'error', Date.now() - started, e.message.slice(0, 300));
       lastError = e;
@@ -1312,6 +1318,7 @@ export async function runSpeech(model: string | undefined, params: SpeechParams)
   // Only a chain rate limited end to end earns a Retry-After (the soonest).
   const hints = new RetryHintTracker();
   for (const row of chain) {
+    throwIfClientGone(params.signal);
     const { credential, budgetBlocked } = KEYLESS_CAPABLE.has(row.platform)
       ? { credential: { id: null, key: null, baseUrl: null, release: () => {} }, budgetBlocked: false }
       : reserveProviderCredential(row, 0);
@@ -1329,6 +1336,7 @@ export async function runSpeech(model: string | undefined, params: SpeechParams)
       logMedia(row, credential.id, 'success', Date.now() - started, null);
       return { platform: row.platform, modelId: row.model_id, audio: out.audio, contentType: out.contentType };
     } catch (err: any) {
+      if (params.signal?.aborted) throw new MediaError('client closed the request', 499);
       const e = err instanceof MediaError ? err : new MediaError(String(err?.message ?? err), 502);
       logMedia(row, credential.id, 'error', Date.now() - started, e.message.slice(0, 300));
       lastError = e;

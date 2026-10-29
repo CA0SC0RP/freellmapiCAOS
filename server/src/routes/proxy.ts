@@ -1081,9 +1081,13 @@ proxyRouter.post('/images/generations', async (req: Request, res: Response) => {
     res.status(400).json({ error: { message: 'Invalid request: `prompt` is required', type: 'invalid_request_error' } });
     return;
   }
+  const clientAbort = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) clientAbort.abort();
+  });
   try {
     const result = await runImageGeneration(parsed.data.model, {
-      prompt: parsed.data.prompt, n: parsed.data.n, size: parsed.data.size,
+      prompt: parsed.data.prompt, n: parsed.data.n, size: parsed.data.size, signal: clientAbort.signal,
     });
     res.json({
       created: Math.floor(Date.now() / 1000),
@@ -1092,6 +1096,7 @@ proxyRouter.post('/images/generations', async (req: Request, res: Response) => {
       provider: result.platform,
     });
   } catch (err: any) {
+    if (clientAbort.signal.aborted || res.writableEnded) return;
     const status = err instanceof MediaError ? err.status : 502;
     const code = err instanceof MediaError ? inferenceBudgetCode(err, res) : {};
     const httpStatus = status >= 400 && status < 600 ? status : 502;
@@ -1175,14 +1180,19 @@ proxyRouter.post('/audio/speech', async (req: Request, res: Response) => {
     res.status(400).json({ error: { message: 'Invalid request: `input` is required', type: 'invalid_request_error' } });
     return;
   }
+  const clientAbort = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) clientAbort.abort();
+  });
   try {
     const result = await runSpeech(parsed.data.model, {
-      input: parsed.data.input, voice: parsed.data.voice, format: parsed.data.response_format,
+      input: parsed.data.input, voice: parsed.data.voice, format: parsed.data.response_format, signal: clientAbort.signal,
     });
     res.setHeader('Content-Type', result.contentType);
     res.setHeader('X-Provider', safeHeaderValue(result.platform));
     res.send(result.audio);
   } catch (err: any) {
+    if (clientAbort.signal.aborted || res.writableEnded) return;
     const status = err instanceof MediaError ? err.status : 502;
     const code = err instanceof MediaError ? inferenceBudgetCode(err, res) : {};
     const httpStatus = status >= 400 && status < 600 ? status : 502;
