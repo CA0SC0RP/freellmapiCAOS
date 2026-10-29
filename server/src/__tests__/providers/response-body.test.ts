@@ -106,3 +106,22 @@ describe('provider streaming frame limits', () => {
     await expect(readProviderResponseBytes(response, 8)).rejects.toThrow(/exceeded.*byte limit/);
   });
 });
+
+
+describe('provider response byte limit configuration', () => {
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid response byte limit %s',
+    async (limit) => {
+      const response = new Response('small');
+      await expect(readProviderResponseText(response, limit)).rejects.toThrow(/non-negative safe integer/);
+      await expect(readProviderResponseBytes(response, limit)).rejects.toThrow(/non-negative safe integer/);
+      expect(() => assertProviderStreamChunkWithinLimit(new Uint8Array(0), limit))
+        .toThrow(/non-negative safe integer/);
+    },
+  );
+
+  it('accepts a zero-byte limit only for an empty response', async () => {
+    await expect(readProviderResponseBytes(new Response(null), 0)).resolves.toEqual(new Uint8Array(0));
+    await expect(readProviderResponseText(new Response('x'), 0)).rejects.toThrow(/exceeded/);
+  });
+});
