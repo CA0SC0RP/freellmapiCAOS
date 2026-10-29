@@ -51,16 +51,13 @@ describe('CloudflareProvider', () => {
 
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: async () => ({
-          choices: [{
-            index: 0,
-            message: { role: 'assistant', content: 'Image received' },
-            finish_reason: 'stop',
-          }],
-        }),
-      } as any;
+      return new Response(JSON.stringify({
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'Image received' },
+          finish_reason: 'stop',
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     const content = [
@@ -85,13 +82,9 @@ describe('CloudflareProvider', () => {
 
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: false,
-        status: 400,
-        statusText: 'Mock stop',
-        headers: new Headers(),
-        json: async () => ({ error: { message: 'Mock stop' } }),
-      } as any;
+      return new Response(JSON.stringify({ error: { message: 'Mock stop' } }), {
+        status: 400, statusText: 'Mock stop', headers: { 'Content-Type': 'application/json' },
+      }) as any;
     });
 
     const content = [
