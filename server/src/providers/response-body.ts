@@ -1,5 +1,7 @@
 /** Maximum size of a fully buffered upstream provider response body. */
 export const MAX_PROVIDER_RESPONSE_BYTES = 2 * 1024 * 1024;
+/** Maximum permitted size of one streamed SSE line/frame. */
+export const MAX_PROVIDER_STREAM_FRAME_BYTES = 2 * 1024 * 1024;
 
 /** Read a response body while enforcing a hard byte limit independent of Content-Length. */
 export async function readProviderResponseText(res: Response, maxBytes = MAX_PROVIDER_RESPONSE_BYTES): Promise<string> {
