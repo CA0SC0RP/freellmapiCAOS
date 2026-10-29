@@ -35,7 +35,7 @@ import net from 'node:net';
 // module's return value coupled to the transport; never re-resolve after this
 // assessment.
 
-export type AddressClass = 'metadata' | 'link-local' | 'loopback' | 'private' | 'public';
+export type AddressClass = 'metadata' | 'link-local' | 'loopback' | 'private' | 'reserved' | 'public';
 
 const METADATA_HOSTNAMES = new Set([
   'metadata.google.internal',
@@ -65,6 +65,15 @@ function classifyIpv4(ip: string): AddressClass {
   // user-facing LLM endpoint is published.
   if (a === 100 && b >= 64 && b <= 127) return 'private';
   if (a === 0) return 'loopback'; // 0.0.0.0 → "this host"
+  // IANA special-purpose, documentation, benchmarking, multicast, and
+  // reserved-use ranges are not globally routable provider destinations.
+  if (a === 192 && b === 0 && octets[2] === 0) return 'reserved'; // 192.0.0.0/24
+  if (a === 192 && b === 0 && octets[2] === 2) return 'reserved'; // TEST-NET-1
+  if (a === 192 && b === 88 && octets[2] === 99) return 'reserved'; // deprecated 6to4 relay anycast
+  if (a === 198 && (b === 18 || b === 19)) return 'reserved'; // benchmarking
+  if (a === 198 && b === 51 && octets[2] === 100) return 'reserved'; // TEST-NET-2
+  if (a === 203 && b === 0 && octets[2] === 113) return 'reserved'; // TEST-NET-3
+  if (a >= 224) return 'reserved'; // multicast, reserved, and limited broadcast
   return 'public';
 }
 
@@ -121,6 +130,18 @@ function classifyIpv6(ip: string): AddressClass {
   if (AWS_IMDS_V6.every((h, i) => h === hextets[i])) return 'metadata';
   if ((h0 & 0xffc0) === 0xfe80) return 'link-local'; // fe80::/10
   if ((h0 & 0xfe00) === 0xfc00) return 'private'; // fc00::/7 (ULA)
+  if ((h0 & 0xff00) === 0xff00) return 'reserved'; // ff00::/8 multicast
+  if (h0 === 0x2001 && h1 === 0x0db8) return 'reserved'; // 2001:db8::/32 documentation
+  if (h0 === 0x3fff && (h1 & 0xfff0) === 0) return 'reserved'; // 3fff::/20 documentation
+  if (h0 === 0x2002) {
+    // 6to4 embeds an IPv4 destination in bits 16–47. Apply the IPv4 policy
+    // to the embedded address so a public IPv6 wrapper cannot mask an
+    // internal or otherwise non-public IPv4 target.
+    return classifyIpv4(`${h1 >> 8}.${h1 & 0xff}.${h2 >> 8}.${h2 & 0xff}`);
+  }
+  // Only global-unicast 2000::/3 is considered public by this guard. This
+  // deliberately blocks other special-use IPv6 space by default.
+  if ((h0 & 0xe000) !== 0x2000) return 'reserved';
   return 'public';
 }
 
@@ -256,6 +277,9 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
     }
     if (cls === 'link-local') {
       return { allowed: false, reason: `resolves to a link-local address (${address})` };
+    }
+    if (cls === 'reserved') {
+      return { allowed: false, reason: `resolves to a reserved or non-global address (${address})` };
     }
     if (blockPrivate && (cls === 'loopback' || cls === 'private')) {
       return {
