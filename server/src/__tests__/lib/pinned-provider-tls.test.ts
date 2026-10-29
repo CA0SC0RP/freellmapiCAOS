@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { createSecureContext, createServer, type Server } from 'node:tls';
+import { createSecureContext } from 'node:tls';
+import { createServer, type Server } from 'node:https';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
 import { pinnedProviderFetch } from '../../lib/pinned-provider-fetch.js';
