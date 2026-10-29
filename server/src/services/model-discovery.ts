@@ -419,10 +419,11 @@ export async function readCappedBody(res: Response, maxBytes = MAX_CATALOG_BYTES
   if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge();
 
   const body = res.body as ReadableStream<Uint8Array> | null | undefined;
+  if (body === null) return '';
   if (!body || typeof body.getReader !== 'function') {
-    const text = await res.text();
-    if (Buffer.byteLength(text, 'utf8') > maxBytes) throw tooLarge();
-    return text;
+    // Do not fall back to text(), which buffers the complete upstream body
+    // before a post-read size check can run.
+    throw new ModelDiscoveryError(502, 'The endpoint does not expose a readable response stream; refusing an unbounded body read.');
   }
 
   const reader = body.getReader();
