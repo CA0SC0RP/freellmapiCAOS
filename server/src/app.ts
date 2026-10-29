@@ -38,6 +38,7 @@ import { moderationRouter } from './routes/moderation.js';
 import { requireAuth } from './middleware/requireAuth.js';
 import { createHostGuard } from './middleware/allowed-hosts.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
+import { createJsonBodyAdmission } from './middleware/boundedJsonParser.js';
 
 // Password-guess ceiling for GET /api/keys/export. Deliberately low: a real
 // user exports keys occasionally, never ten times a minute.
@@ -203,11 +204,16 @@ export function createApp(config?: Config) {
   // their sessions off mid-conversation. body-parser skips requests whose
   // body was already parsed, so the second parser only sees what the first
   // didn't own; an over-limit body throws from whichever parser matched.
+  // Both parsers share one admission counter so the larger inference parser
+  // and the smaller dashboard parser cannot each consume the full allowance.
+  // Capacity is held only while the JSON body is being read and parsed, not
+  // during provider inference or the response stream.
+  const admitJsonBody = createJsonBodyAdmission(cfg.jsonBodyMaxConcurrent);
   app.use(
     ['/v1', '/v1beta', '/mcp', '/api/chat', '/api/generate', '/api/embed', '/api/embeddings'],
-    express.json({ limit: cfg.requestBodyLimitBytes }),
+    admitJsonBody(express.json({ limit: cfg.requestBodyLimitBytes })),
   );
-  app.use(express.json({ limit: '10mb' }));
+  app.use(admitJsonBody(express.json({ limit: '10mb' })));
 
   // Caller identity (IP + User-Agent) for request analytics, carried in
   // AsyncLocalStorage so logRequest() can read it from any depth.
