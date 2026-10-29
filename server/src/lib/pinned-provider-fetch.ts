@@ -14,7 +14,7 @@ export function createPinnedLookup(
   expectedHostname: string,
   vettedAddresses: string[],
 ): (hostname: string, options: { all?: boolean; family?: number }, callback: LookupCallback) => void {
-  const expected = expectedHostname.replace(/^\\[|\\]$/g, '').toLowerCase().replace(/\\.$/, '');
+  const expected = expectedHostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\\.$/, '');
   const records = [...new Set(vettedAddresses)].map((address) => {
     const family = net.isIP(address);
     if (!family) throw new Error('Pinned provider destination contains an invalid IP address');
@@ -24,7 +24,7 @@ export function createPinnedLookup(
 
   let cursor = 0;
   return (hostname, options, callback) => {
-    const requested = hostname.replace(/^\\[|\\]$/g, '').toLowerCase().replace(/\\.$/, '');
+    const requested = hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\\.$/, '');
     if (requested !== expected) {
       const error = Object.assign(new Error('Pinned provider lookup received an unexpected hostname'), { code: 'EACCES' });
       callback(error, '', 0);
