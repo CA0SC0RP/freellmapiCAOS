@@ -287,11 +287,9 @@ describe('OpenAICompatProvider', () => {
     // e.g. a custom base URL pointing at Ollama's native NDJSON /api endpoint:
     // real fetch's res.json() rejects with "Unexpected non-whitespace character
     // after JSON at position …", which is useless to the user.
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.reject(new SyntaxError('Unexpected non-whitespace character after JSON at position 583 (line 27 column 2)')),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"object":"list"}\n{"object":"list"}', {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }) as any);
 
     await expect(
       provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model')
@@ -305,12 +303,9 @@ describe('OpenAICompatProvider', () => {
     // the NDJSON / native-API case above. Operators were chasing a base-URL bug that
     // didn't exist because both paths produced the same error string.
     const headers = new Headers({ 'content-type': 'application/json' });
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers,
-      json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"choices":[', {
+      status: 200, headers,
+    }) as any);
 
     let caught: Error | null = null;
     try {
@@ -329,12 +324,9 @@ describe('OpenAICompatProvider', () => {
     // mid-token garbage character before EOF. Content-Type is the only signal
     // that distinguishes this from a real NDJSON upstream (next test).
     const headers = new Headers({ 'content-type': 'application/json' });
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers,
-      json: () => Promise.reject(new SyntaxError('Unexpected non-whitespace character after JSON at position 4096 (line 1 column 4097)')),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"choices":[]}garbage', {
+      status: 200, headers,
+    }) as any);
 
     await expect(
       provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model')
@@ -347,12 +339,9 @@ describe('OpenAICompatProvider', () => {
     // substring (NDJSON bodies do — the parser eats one object, then trips
     // on the next one), we must not misclassify it as a CDN truncation.
     const headers = new Headers({ 'content-type': 'application/x-ndjson' });
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers,
-      json: () => Promise.reject(new SyntaxError('Unexpected non-whitespace character after JSON at position 120 (line 3 column 1)')),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"object":"list"}\n{"object":"list"}', {
+      status: 200, headers,
+    }) as any);
 
     await expect(
       provider.chatCompletion('key', [{ role: 'user', content: 'hi' }], 'model')
@@ -388,22 +377,16 @@ describe('OpenAICompatProvider', () => {
 
   it('validateKey treats a 200 that is not JSON as an error, not a healthy key (#1557)', async () => {
     // Retired GitHub Models answered every path with 200 "OK" in plain text.
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-type': 'text/plain' }),
-      text: () => Promise.resolve('OK\n'),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('OK\n', {
+      status: 200, headers: { 'Content-Type': 'text/plain' },
+    }) as any);
     await expect(provider.validateKey('any')).rejects.toThrow(/did not answer JSON/);
   });
 
   it('validateKey accepts a JSON model list', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      text: () => Promise.resolve('{"object":"list","data":[]}'),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"object":"list","data":[]}', {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }) as any);
     expect(await provider.validateKey('valid')).toBe(true);
   });
 
