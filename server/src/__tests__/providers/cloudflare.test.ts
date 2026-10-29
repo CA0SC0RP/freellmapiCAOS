@@ -22,17 +22,14 @@ describe('CloudflareProvider', () => {
       capturedUrl = url as string;
       capturedHeaders = (init as any).headers;
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'chatcmpl-cf',
           object: 'chat.completion',
           created: 123,
           model: '@cf/meta/llama-3.1-70b-instruct',
           choices: [{ index: 0, message: { role: 'assistant', content: 'Hello from CF!' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     const result = await provider.chatCompletion(
@@ -135,11 +132,7 @@ describe('CloudflareProvider', () => {
       const calls: string[] = [];
       vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
         calls.push(url as string);
-        return {
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ success: true, result: { status: 'active' } }),
-        } as any;
+        return new Response(JSON.stringify({ success: true, result: { status: 'active' } }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       });
 
       expect(await provider.validateKey('acc123:tok')).toBe(true);
@@ -152,13 +145,9 @@ describe('CloudflareProvider', () => {
       vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
         calls.push(url as string);
         if ((url as string).includes('/user/tokens/verify')) {
-          return { ok: false, status: 403, json: () => Promise.resolve({}) } as any;
+          return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
         }
-        return {
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ success: true, result: { status: 'active' } }),
-        } as any;
+        return new Response(JSON.stringify({ success: true, result: { status: 'active' } }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       });
 
       expect(await provider.validateKey('acc123:tok')).toBe(true);
@@ -168,12 +157,7 @@ describe('CloudflareProvider', () => {
 
     it('fails with the upstream reason when both scopes reject the token', async () => {
       vi.spyOn(global, 'fetch').mockImplementation(async () => {
-        return {
-          ok: false,
-          status: 403,
-          statusText: 'Forbidden',
-          json: () => Promise.resolve({ success: false, errors: [{ code: 9109, message: 'Invalid access token' }] }),
-        } as any;
+        return new Response(JSON.stringify({ success: false, errors: [{ code: 9109, message: 'Invalid access token' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       });
 
       const result = await provider.validateKey('acc123:tok');
@@ -185,13 +169,9 @@ describe('CloudflareProvider', () => {
     it('fails with the token status when the account scope reports an inactive token', async () => {
       vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
         if ((url as string).includes('/user/tokens/verify')) {
-          return { ok: false, status: 403, json: () => Promise.resolve({}) } as any;
+          return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
         }
-        return {
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ success: true, result: { status: 'disabled' } }),
-        } as any;
+        return new Response(JSON.stringify({ success: true, result: { status: 'disabled' } }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       });
 
       const result = await provider.validateKey('acc123:tok');
@@ -204,17 +184,14 @@ describe('CloudflareProvider', () => {
     let capturedBody: any = null;
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       capturedBody = JSON.parse((init as any).body);
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'chatcmpl-cf',
           object: 'chat.completion',
           created: 123,
           model: '@cf/meta/llama-3.1-70b-instruct',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     await provider.chatCompletion(
@@ -245,9 +222,7 @@ describe('CloudflareProvider', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       capturedUrl = String(url);
       capturedBody = JSON.parse(String((init as any).body));
-      return {
-        ok: true,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'cf-tool-test',
           object: 'chat.completion',
           created: 123,
@@ -266,8 +241,7 @@ describe('CloudflareProvider', () => {
             finish_reason: 'tool_calls',
           }],
           usage: { prompt_tokens: 8, completion_tokens: 3, total_tokens: 11 },
-        }),
-      } as any;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
     });
 
     const result = await provider.chatCompletion(
