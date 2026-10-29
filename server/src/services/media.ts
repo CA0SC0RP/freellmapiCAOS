@@ -675,7 +675,15 @@ async function callSpeechProvider(
       }
       // Use the shared bounded reader so a failed stream is cancelled and the
       // response is not retained twice as per-chunk Buffers plus Buffer.concat.
-      const audio = bufferView(await readProviderResponseBytes(output, maxBytes));
+      let audio: Buffer;
+      try {
+        audio = bufferView(await readProviderResponseBytes(output, maxBytes));
+      } catch (error) {
+        if (error instanceof Error && /exceeded.*byte limit/.test(error.message)) {
+          throw new MediaError('Free.ai speech output is too large', 502);
+        }
+        throw error;
+      }
       if (audio.length <= 44 || audio.toString('ascii', 0, 4) !== 'RIFF' || audio.toString('ascii', 8, 12) !== 'WAVE') {
         throw new MediaError('Free.ai returned no recognized WAV audio', 502);
       }
