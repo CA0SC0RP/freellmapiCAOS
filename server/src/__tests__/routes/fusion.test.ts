@@ -630,15 +630,11 @@ describe('fusion route (/v1/chat/completions, model: "fusion")', () => {
         }) as any;
       }
       if (u.includes('api.cerebras.ai')) {
-        return {
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-timeout-fallback', object: 'chat.completion', created: 1, model: 'm',
             choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: toolCalls }, finish_reason: 'tool_calls' }],
             usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url as any, init as any);
     });
