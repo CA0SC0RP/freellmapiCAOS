@@ -17,7 +17,7 @@ function jsonResponse(): any {
       model: 'm',
       choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;;
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
 }
 
 function sseResponse(): any {
