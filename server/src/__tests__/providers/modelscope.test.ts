@@ -94,7 +94,7 @@ describe('ModelScope validateKey (#581)', () => {
     // Neither case is an auth failure, so the key must not be disabled.
     vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
       if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
-      return new Response(JSON.stringify({ error: { message: 'Request limit exceeded' } }), { status: 429, headers: { 'Content-Type': 'application/json' } }) as any; as unknown as Response;
+      return new Response(JSON.stringify({ error: { message: 'Request limit exceeded' } }), { status: 429, headers: { 'Content-Type': 'application/json' } }) as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
@@ -102,22 +102,18 @@ describe('ModelScope validateKey (#581)', () => {
   });
 
   it('throws (health status=error, never invalid) when the roster fetch fails', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: false,
-      status: 503,
-      json: () => Promise.resolve({}),
-    } as unknown as Response);
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({}), {
+      status: 503, headers: { 'Content-Type': 'application/json' },
+    }) as unknown as Response);
 
     const provider = new ModelScopeProvider();
     await expect(provider.validateKey(GARBAGE_KEY)).rejects.toThrow(/HTTP 503/);
   });
 
   it('throws when the roster is empty (no probe model available)', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ object: 'list', data: [] }),
-    } as unknown as Response);
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ object: 'list', data: [] }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }) as unknown as Response);
 
     const provider = new ModelScopeProvider();
     await expect(provider.validateKey(GARBAGE_KEY)).rejects.toThrow(/no models/);
@@ -131,7 +127,7 @@ describe('ModelScope validateKey (#581)', () => {
           model: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
           choices: [{ index: 0, message: { role: 'assistant', content: 'p' }, finish_reason: 'length' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any; as unknown as Response;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
