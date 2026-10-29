@@ -14,9 +14,8 @@ import { secondsUntilNextMonth } from './key-budget.js';
 import { noteBudgetAlerts } from './budget-alerts.js';
 import { getClientContext } from '../lib/client-context.js';
 import { reserveProviderCredential } from './provider-credential.js';
-import { proxyFetch } from '../lib/proxy.js';
+import { pinnedExternalProviderFetch, proxyFetch } from '../lib/proxy.js';
 import { bearerAuthHeader } from '../lib/credential.js';
-import { assessProviderUrl } from '../lib/url-guard.js';
 import { isOnCooldown, setCooldown } from './ratelimit.js';
 import { markKeyHealthyFromRequest } from './health.js';
 import { readProviderResponseBytes, readProviderResponseJson, readProviderResponseText } from '../providers/response-body.js';
@@ -255,10 +254,13 @@ async function mediaFetch(
    *  top of the per-request timeout so a departed client drops the upstream
    *  request instead of leaving it to run out the clock. */
   clientSignal?: AbortSignal,
+  /** Pin provider-supplied download URLs to a vetted public DNS answer set. */
+  pinPublicDestination = false,
 ): Promise<Response> {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = clientSignal ? AbortSignal.any([timeoutSignal, clientSignal]) : timeoutSignal;
-  const r = await proxyFetch(
+  const fetcher = pinPublicDestination ? pinnedExternalProviderFetch : proxyFetch;
+  const r = await fetcher(
     url,
     { ...init, signal },
     platform,
@@ -577,17 +579,12 @@ async function callHuggingFaceVideo(
   const result = (await readProviderResponseJson(completed)) as { video?: { url?: string; content_type?: string } };
   const videoUrl = result.video?.url;
   if (!videoUrl) throw new MediaError('huggingface returned no video URL', 502);
-  // Every other URL this adapter contacts is built from constants; this one
-  // comes out of an upstream JSON body, which is exactly the shape #440's
-  // guard exists for. Refuse anything that is not plain http(s) on a routable
-  // address before spending a request on it — a result URL pointing at cloud
-  // metadata or a link-local address would otherwise be fetched and streamed
-  // straight back to the caller.
-  const verdict = await assessProviderUrl(videoUrl);
-  if (!verdict.allowed) {
-    throw new MediaError(`huggingface returned an unusable video URL: ${verdict.reason}`, 502);
-  }
-  const downloaded = await mediaFetch(videoUrl, 'huggingface', 'video', { method: 'GET' }, remaining(), clientSignal);
+  // This URL is supplied by an upstream response, so fetch it only over HTTPS,
+  // reject private destinations and redirects, and pin the socket to the vetted
+  // public DNS answer set to prevent a DNS-rebinding gap.
+  const downloaded = await mediaFetch(
+    videoUrl, 'huggingface', 'video', { method: 'GET' }, remaining(), clientSignal, true,
+  );
   const video = bufferView(await readProviderResponseBytes(downloaded, MAX_VIDEO_RESPONSE_BYTES));
   return {
     video,
