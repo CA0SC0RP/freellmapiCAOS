@@ -7,7 +7,7 @@ import type { KeyValidationFailure } from '../../providers/base.js';
 // this project yet (auth requires an Alibaba Cloud cn-site account binding).
 const GARBAGE_KEY = 'ms-test-invalid';
 
-const ROSTER = new Response(JSON.stringify({
+const rosterResponse = () => new Response(JSON.stringify({
   object: 'list',
   data: [
     { id: 'Qwen/Qwen3-235B-A22B-Instruct-2507', object: 'model' },
@@ -19,7 +19,7 @@ const ROSTER = new Response(JSON.stringify({
 // garbage Bearer token. The alibaba-binding variant below is the
 // maintainer-documented shape for unbound accounts — unconfirmed until a
 // community tester runs a real token (#581).
-const AUTH_FAILED_401 = new Response(JSON.stringify({
+const authFailedResponse = () => new Response(JSON.stringify({
   error: { message: 'please bind your alibaba cloud account before use' },
 }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
@@ -48,8 +48,8 @@ describe('ModelScope validateKey (#581)', () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       calls.push({ url: String(url), init: init as RequestInit });
-      if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
-      return AUTH_FAILED_401 as unknown as Response;
+      if (String(url).endsWith('/models')) return rosterResponse() as unknown as Response;
+      return authFailedResponse() as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
