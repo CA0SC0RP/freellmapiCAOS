@@ -352,12 +352,9 @@ describe('OpenAICompatProvider', () => {
     // Companion to the previous test: explicitly assert the truncation message
     // does NOT appear, so a future refactor can't silently switch the branch.
     const headers = new Headers({ 'content-type': 'application/x-ndjson' });
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      headers,
-      json: () => Promise.reject(new SyntaxError('Unexpected non-whitespace character after JSON at position 120 (line 3 column 1)')),
-    } as any);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(new Response('{"object":"list"}\n{"object":"list"}', {
+      status: 200, headers,
+    }) as any);
 
     let caught: Error | null = null;
     try {
