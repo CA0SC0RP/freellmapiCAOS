@@ -39,6 +39,23 @@ describe('classifyIp', () => {
     expect(classifyIp('fd12:3456::1')).toBe('private');
   });
 
+  it('classifies non-global IPv4 special-use ranges as reserved', () => {
+    for (const ip of [
+      '192.0.0.1', '192.0.2.1', '192.88.99.1', '198.18.0.1',
+      '198.19.255.254', '198.51.100.2', '203.0.113.7',
+      '224.0.0.1', '239.255.255.255', '240.0.0.1', '255.255.255.255',
+    ]) expect(classifyIp(ip), ip).toBe('reserved');
+  });
+
+  it('classifies non-global IPv6 special-use ranges as reserved', () => {
+    expect(classifyIp('ff02::1')).toBe('reserved');
+    expect(classifyIp('2001:db8::1')).toBe('reserved');
+    expect(classifyIp('3fff::1')).toBe('reserved');
+    expect(classifyIp('100::1')).toBe('reserved');
+    expect(classifyIp('2002:a9fe:a9fe::1')).toBe('metadata');
+    expect(classifyIp('2002:0808:0808::1')).toBe('public');
+  });
+
   it('classifies public addresses and IPv4-mapped IPv6', () => {
     expect(classifyIp('8.8.8.8')).toBe('public');
     expect(classifyIp('172.32.0.1')).toBe('public'); // just past 172.16/12
@@ -140,6 +157,16 @@ describe('assessProviderUrl', () => {
     });
     expect(verdict.allowed).toBe(false);
     expect(verdict.reason).toMatch(/metadata/);
+  });
+
+  it('rejects reserved addresses returned by DNS', async () => {
+    for (const address of ['198.18.0.1', '224.0.0.1', 'ff02::1', '2001:db8::1']) {
+      const verdict = await assessProviderUrl('https://api.example.com/v1', {
+        resolve: async () => [address],
+      });
+      expect(verdict.allowed, address).toBe(false);
+      expect(verdict.reason).toMatch(/reserved or non-global/);
+    }
   });
 
   it('rejects malformed addresses returned by DNS instead of treating them as public', async () => {
