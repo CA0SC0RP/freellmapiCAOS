@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, 'fix/ssrf-dns-fail-closed']
 
 jobs:
   test:
@@ -33,9 +33,9 @@ jobs:
         run: npm run test:migrations
 
       # COVERAGE makes the server suite collect coverage inside this run rather
-      # than running the whole suite a second time. Only the Node 22 leg sets
-      # it, so the Node 20 leg keeps uninstrumented timings. Reporting only,
-      # there are no thresholds and coverage never fails the build.
+      # than running the whole suite a second time. Only the Node 22 leg sets it,
+      # so the Node 20 leg keeps uninstrumented timings. Coverage is reporting
+      # only; there are no thresholds and it never fails the build.
       - name: Run tests
         env:
           COVERAGE: ${{ matrix.node-version == '22' && '1' || '' }}
