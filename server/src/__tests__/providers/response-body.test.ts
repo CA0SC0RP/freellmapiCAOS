@@ -23,3 +23,11 @@ describe('provider response body size limits', () => {
     await expect(readProviderResponseJson<{ ok: boolean }>(response)).resolves.toEqual({ ok: true });
   });
 });
+
+
+describe('provider streaming frame limits', () => {
+  it('defines a bounded frame size for SSE readers', async () => {
+    const { MAX_PROVIDER_STREAM_FRAME_BYTES } = await import('../../providers/response-body.js');
+    expect(MAX_PROVIDER_STREAM_FRAME_BYTES).toBe(2 * 1024 * 1024);
+  });
+});
