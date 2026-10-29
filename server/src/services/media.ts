@@ -1077,6 +1077,8 @@ export interface TranscriptionParams {
   temperature?: number;
   /** 'json' | 'text' | 'verbose_json' | 'vtt' (srt is rejected at the route). */
   responseFormat: string;
+  /** Abort upstream work when the requesting client disconnects. */
+  signal?: AbortSignal;
 }
 
 export interface TranscriptionResult {
@@ -1142,7 +1144,7 @@ async function callTranscriptionProvider(
       if (p.temperature !== undefined) form.append('temperature', String(p.temperature));
       const r = await mediaFetch('https://api.mistral.ai/v1/audio/transcriptions', 'mistral', 'transcription', {
         method: 'POST', redirect: 'error', headers: { ...bearerAuthHeader(key) }, body: form,
-      });
+      }, FETCH_TIMEOUT_MS, p.signal);
       const j = await readProviderResponseJson(r, MAX_TRANSCRIPTION_RESPONSE_BYTES) as { text?: unknown; language?: unknown; segments?: unknown; error?: unknown } | null;
       if (j?.error || typeof j?.text !== 'string') throw new MediaError('mistral returned no transcription text', 502);
       return { text: j.text, language: typeof j.language === 'string' ? j.language : undefined,
@@ -1159,7 +1161,7 @@ async function callTranscriptionProvider(
         method: 'POST',
         headers: { ...bearerAuthHeader(key) },
         body: form,
-      });
+      }, FETCH_TIMEOUT_MS, p.signal);
       const j = (await readProviderResponseJson(r, MAX_TRANSCRIPTION_RESPONSE_BYTES)) as { text?: unknown } | null;
       if (!j || typeof j.text !== 'string') throw new MediaError('typhoon returned no transcription text', 502);
       return { text: j.text };
@@ -1184,7 +1186,7 @@ async function callTranscriptionProvider(
         method: 'POST',
         headers: { ...bearerAuthHeader(key) },
         body: form,
-      });
+      }, FETCH_TIMEOUT_MS, p.signal);
       const j = (await readProviderResponseJson(r, MAX_TRANSCRIPTION_RESPONSE_BYTES)) as { text?: string; language?: string; duration?: number; segments?: unknown[] };
       if (typeof j.text !== 'string') throw new MediaError('custom endpoint returned no transcription text', 502);
       return { text: j.text, language: j.language, duration: j.duration, segments: j.segments };
@@ -1205,7 +1207,7 @@ async function callTranscriptionProvider(
         method: 'POST',
         headers: { Authorization: `Bearer ${key}` },
         body: form,
-      });
+      }, FETCH_TIMEOUT_MS, p.signal);
       const j = (await readProviderResponseJson(r, MAX_TRANSCRIPTION_RESPONSE_BYTES)) as { text?: string; language?: string; duration?: number; segments?: unknown[] };
       if (typeof j.text !== 'string') throw new MediaError('groq returned no transcription text', 502);
       return { text: j.text, language: j.language, duration: j.duration, segments: j.segments };
@@ -1268,6 +1270,7 @@ export async function runTranscription(model: string | undefined, p: Transcripti
   // Only a chain rate limited end to end earns a Retry-After (the soonest).
   const hints = new RetryHintTracker();
   for (const m of usable) {
+    throwIfClientGone(p.signal);
     const { credential, budgetBlocked } = reserveProviderCredential({ platform: m.platform, key_id: m.keyId }, 0,
       keyId => isOnCooldown(m.platform, m.modelId, keyId));
     if (!credential) {
@@ -1287,6 +1290,7 @@ export async function runTranscription(model: string | undefined, p: Transcripti
       logMedia(logRow, credential.id, 'success', Date.now() - started, null);
       return { platform: m.platform, modelId: m.modelId, ...out };
     } catch (err: any) {
+      if (p.signal?.aborted) throw new MediaError('client closed the request', 499);
       const e = err instanceof MediaError ? err : new MediaError(String(err?.message ?? err), 502);
       logMedia(logRow, credential.id, 'error', Date.now() - started, e.message.slice(0, 300));
       if (e.status === 429 && credential.id != null) {
