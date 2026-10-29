@@ -108,6 +108,26 @@ describe('readSseFrames data: prefix (issue #1087)', () => {
     await expect(collect(provider.streamChatCompletion('k', MESSAGES, 'm'))).rejects.toThrow(/exceeded/);
   });
 
+  it('rejects a frame that exceeds the cap across multiple small transport chunks', async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        // Each chunk is below the transport cap, but the unterminated SSE line
+        // grows past the frame cap when the chunks are accumulated.
+        for (let i = 0; i < 4; i++) controller.enqueue(encoder.encode('x'.repeat(600_000)));
+        controller.close();
+      },
+    });
+    const provider = makeProvider();
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }));
+
+    await expect(collect(provider.streamChatCompletion('k', MESSAGES, 'm')))
+      .rejects.toThrow(/stream frame exceeded/);
+  });
+
   it('throws when the stream ends without [DONE] or finish_reason', async () => {
     const body = `data: ${CONTENT_CHUNK}\n\n`;
     const provider = makeProvider();
