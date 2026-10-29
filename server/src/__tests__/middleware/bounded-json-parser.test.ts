@@ -55,13 +55,13 @@ describe('bounded JSON body parser admission', () => {
     const secondParser: RequestHandler = (_req, _res, next) => next();
     const first = admit(firstParser);
     const second = admit(secondParser);
-    first(request(), response(), vi.fn() as unknown as NextFunction);
+    const next = vi.fn() as unknown as NextFunction;
+    first(request(), response(), next);
 
     const blocked = response();
     second(request(), blocked, vi.fn() as unknown as NextFunction);
     expect(blocked.statusCode).toBe(503);
 
-    const next = vi.fn() as unknown as NextFunction;
     finish(new Error('invalid JSON'));
     expect(next).toHaveBeenCalledWith(expect.any(Error));
 
