@@ -11,6 +11,7 @@ import { getCacheStats, clearCache } from '../services/cache.js';
 import { getCompressionStats } from '../services/compression/stats.js';
 import { getQuotaOutlook } from '../services/quota-outlook.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
+import { readProviderResponseText } from '../providers/response-body.js';
 import { z } from 'zod';
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -321,7 +322,7 @@ async function askFreeLlmApi(args: Record<string, unknown>, req: Request, res: R
       signal: controller.signal,
     });
 
-    const raw = await response.text();
+    const raw = await readProviderResponseText(response);
     let payload: any;
     try {
       payload = raw ? JSON.parse(raw) : null;

@@ -293,6 +293,34 @@ describe('MCP server (/mcp, stateless Streamable HTTP)', () => {
     }
   });
 
+  it('rejects an oversized internal inference response before JSON parsing', async () => {
+    const originalFetch = global.fetch;
+    vi.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/v1/chat/completions')) {
+        return new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(2 * 1024 * 1024));
+            controller.enqueue(new Uint8Array([1]));
+            controller.close();
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return originalFetch(input, init);
+    });
+
+    try {
+      const { body } = await rpc({
+        jsonrpc: '2.0', id: 73, method: 'tools/call',
+        params: { name: 'ask_freellmapi', arguments: { prompt: 'Test bounded response reading.' } },
+      });
+      expect(body.result.isError).toBe(true);
+      expect(body.result.content[0].text).toContain('2097152-byte limit');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('unknown tool and unknown method return JSON-RPC errors', async () => {
     const tool = await rpc({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'rm_rf' } });
     expect(tool.body.error.code).toBe(-32602);

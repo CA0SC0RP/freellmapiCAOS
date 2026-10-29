@@ -1,4 +1,5 @@
 import { getDb } from '../db/index.js';
+import { readProviderResponseJson, readProviderResponseText } from '../providers/response-body.js';
 import { BEATAPI_BASE_URL } from '../providers/beatapi.js';
 import { APINEX_BASE_URL } from '../providers/apinex.js';
 import { BLOCKRUN_BASE_URL } from '../providers/blockrun.js';
@@ -148,7 +149,7 @@ async function upstream(url: string, platform: string, init: RequestInit, signal
     FETCH_TIMEOUT_MS,
   );
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
+    const text = await readProviderResponseText(res).catch(() => '');
     // Same rule as the chat path (providers/base.ts buildUpstreamError): a
     // header Retry-After wins, then a back-off stated in the error BODY
     // (Gemini RetryInfo, prose "try again in 45 seconds"). Dropping the body
@@ -160,7 +161,7 @@ async function upstream(url: string, platform: string, init: RequestInit, signal
       parseRetryAfterMs(res.headers?.get('retry-after') ?? null) ?? statedBodyRetryMs(text),
     );
   }
-  return res.json();
+  return readProviderResponseJson(res);
 }
 
 function usageOf(raw: unknown): AdapterResult['usage'] {

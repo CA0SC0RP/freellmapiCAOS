@@ -4,6 +4,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { getSetting } from '../db/index.js';
 import { getAppVersion } from '../lib/app-version.js';
+import { readProviderResponseJson } from '../providers/response-body.js';
 
 const execFileAsync = promisify(nodeExecFile);
 
@@ -270,12 +271,11 @@ async function readCapped(response: FetchResponse, limit: number): Promise<strin
   }
 
   const body = response.body;
+  if (body === null) return '';
   if (!body || typeof body.getReader !== 'function') {
-    // A fetch implementation without a readable body (or a stub); fall back to
-    // buffering, and still refuse anything over the ceiling.
-    const text = await response.text();
-    if (text.length > limit) throw new Error('GitHub Atom feed is too large');
-    return text;
+    // Do not call text(): it allocates the full response before the cap can
+    // be enforced. Reject non-streaming adapters instead.
+    throw new Error('GitHub Atom feed response has no readable stream');
   }
 
   const reader = body.getReader();
@@ -473,7 +473,7 @@ export function createUpdateRouter(options: UpdateRouterOptions = {}): Router {
       throw new Error(`GitHub compare request returned HTTP ${response.status}`);
     }
 
-    const body: unknown = await response.json();
+    const body: unknown = await readProviderResponseJson(response);
     if (!isRecord(body)) throw new Error('GitHub compare response is not an object');
     const upstreamStatus = compareStatus(body.status);
     if (!upstreamStatus) throw new Error('GitHub compare response has an invalid status');
@@ -523,7 +523,7 @@ export function createUpdateRouter(options: UpdateRouterOptions = {}): Router {
       throw new Error(`GitHub latest-release request returned HTTP ${response.status}`);
     }
 
-    const body: unknown = await response.json();
+    const body: unknown = await readProviderResponseJson(response);
     if (!isRecord(body)) throw new Error('GitHub latest-release response is not an object');
     if (typeof body.tag_name !== 'string' || body.tag_name.trim().length === 0) {
       throw new Error('GitHub latest-release response has no tag');

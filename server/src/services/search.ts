@@ -1,4 +1,5 @@
 import { getDb, getSetting, setSetting } from '../db/index.js';
+import { readProviderResponseJson, readProviderResponseText } from '../providers/response-body.js';
 import { parseRetryAfterMs, parseStatedRetryMs } from '../providers/base.js';
 import { RetryHintTracker } from '../lib/retry-hint.js';
 import { getClientContext } from '../lib/client-context.js';
@@ -188,7 +189,7 @@ async function upstream(url: string, platform: string, init: RequestInit, signal
     FETCH_TIMEOUT_MS,
   );
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
+    const body = await readProviderResponseText(res).catch(() => '');
     // Header first, then a back-off stated inside the body (RetryInfo or
     // prose), mirroring buildUpstreamError in providers/base.ts.
     let stated: number | undefined;
@@ -206,9 +207,9 @@ async function upstream(url: string, platform: string, init: RequestInit, signal
   }
   // MCP servers may answer a POST as a one-event stream instead of plain JSON.
   if ((res.headers?.get('content-type') ?? '').includes('text/event-stream')) {
-    return lastSseJson(await res.text());
+    return lastSseJson(await readProviderResponseText(res));
   }
-  return res.json();
+  return readProviderResponseJson(res);
 }
 
 /** The JSON payload of the last `data:` event in an SSE body. */

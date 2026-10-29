@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { Db } from '../db/types.js';
 import { getDb, getSetting, setSetting } from '../db/index.js';
+import { readProviderResponseBytes, readProviderResponseJson } from '../providers/response-body.js';
 import { hasProvider } from '../providers/index.js';
 import { MEDIA_PLATFORMS, TRANSCRIPTION_PLATFORMS, VIDEO_PLATFORMS } from './media.js';
 import { SEARCH_ENGINE_PLATFORMS, SEARCH_MODALITY } from './search.js';
@@ -1092,7 +1093,7 @@ export async function syncCatalog(force = false): Promise<SyncResult> {
 
     const signature = res.headers.get('x-catalog-signature');
     if (!signature) throw new Error('catalog response missing signature');
-    const bytes = Buffer.from(await res.arrayBuffer());
+    const bytes = Buffer.from(await readProviderResponseBytes(res, 8 * 1024 * 1024));
     const verified = crypto.verify(null, bytes, catalogPublicKey(), Buffer.from(signature, 'base64'));
     if (!verified) throw new Error('catalog signature verification FAILED — discarding response');
 
@@ -1169,7 +1170,7 @@ export async function validateLicenseKey(key: string, timeoutMs = FETCH_TIMEOUT_
       body: JSON.stringify({ key }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    return (await res.json()) as LicenseActivation;
+    return (await readProviderResponseJson<LicenseActivation>(res)) as LicenseActivation;
   } catch (err) {
     console.warn(`[catalog-sync] license activation unreachable: ${describeFetchError(err)}`);
     return null;
@@ -1186,7 +1187,7 @@ export async function refreshLicenseStatus(): Promise<LicenseStatus | null> {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok && res.status !== 401) throw new Error(`HTTP ${res.status}`);
-    const body = (await res.json()) as Omit<LicenseStatus, 'checkedAtMs'>;
+    const body = (await readProviderResponseJson<Omit<LicenseStatus, 'checkedAtMs'>>(res)) as Omit<LicenseStatus, 'checkedAtMs'>;
     const status: LicenseStatus = { ...body, checkedAtMs: Date.now() };
     setSetting(SETTING_LICENSE_STATUS, JSON.stringify(status));
     return status;

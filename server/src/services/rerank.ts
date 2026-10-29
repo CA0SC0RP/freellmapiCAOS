@@ -6,6 +6,7 @@ import { checkMonthlyBudget, reserveMonthlyBudget, secondsUntilNextMonth } from 
 import { noteBudgetAlerts } from './budget-alerts.js';
 import { markKeyHealthyFromRequest } from './health.js';
 import { getClientContext } from '../lib/client-context.js';
+import { readProviderResponseJson, readProviderResponseText } from '../providers/response-body.js';
 
 // Cohere-style rerank over the existing free-tier key pool (#1029). Deliberately
 // narrow first slice: platform='cohere' keys and custom OpenAI-compatible
@@ -66,7 +67,7 @@ function candidates(): RerankCandidate[] {
 
 async function upstreamError(r: Response): Promise<RerankError> {
   const retryAfterMs = parseRetryAfterMs(r.headers?.get('retry-after') ?? null);
-  return new RerankError(`upstream ${r.status}: ${(await r.text()).slice(0, 200)}`, r.status, undefined, retryAfterMs);
+  return new RerankError(`upstream ${r.status}: ${(await readProviderResponseText(r)).slice(0, 200)}`, r.status, undefined, retryAfterMs);
 }
 
 // Every other inference surface writes its attempts to `requests` (chat via
@@ -108,7 +109,7 @@ async function callProvider(cand: RerankCandidate, model: string | undefined, qu
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw await upstreamError(res);
-  const body = await res.json() as { results?: { index?: number; relevance_score?: number; document?: { text?: string } | string }[] };
+  const body = await readProviderResponseJson(res) as { results?: { index?: number; relevance_score?: number; document?: { text?: string } | string }[] };
   if (!Array.isArray(body.results)) throw new RerankError('upstream returned malformed rerank results', 502);
   const results = body.results.map(r => ({
     index: r.index ?? -1,
