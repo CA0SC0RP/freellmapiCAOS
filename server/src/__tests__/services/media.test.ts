@@ -88,6 +88,36 @@ describe('media service', () => {
   });
 
   describe('image generation', () => {
+
+    it('rejects excess concurrent media work and releases capacity after completion', async () => {
+      twoImageProviders();
+      const previousLimit = process.env.MEDIA_MAX_CONCURRENT;
+      process.env.MEDIA_MAX_CONCURRENT = '1';
+      let finish!: (response: Response) => void;
+      const fetchMock = vi.fn()
+        .mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+        .mockResolvedValue(jsonResponse({ artifacts: [{ base64: 'AAAA' }] }));
+      globalThis.fetch = fetchMock as any;
+
+      try {
+        const first = runImageGeneration('auto', { prompt: 'first image' });
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+        await expect(runImageGeneration('auto', { prompt: 'second image' }))
+          .rejects.toMatchObject({ status: 503, code: 'media_concurrency_limit', retryAfterMs: 1000 });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        finish(jsonResponse({ artifacts: [{ base64: 'AAAA' }] }));
+        await expect(first).resolves.toMatchObject({ platform: 'nvidia' });
+
+        await expect(runImageGeneration('auto', { prompt: 'third image' }))
+          .resolves.toMatchObject({ platform: 'nvidia' });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        if (previousLimit === undefined) delete process.env.MEDIA_MAX_CONCURRENT;
+        else process.env.MEDIA_MAX_CONCURRENT = previousLimit;
+      }
+    });
+
     it('aborts image generation on client disconnect without failing over', async () => {
       twoImageProviders();
       const controller = new AbortController();
