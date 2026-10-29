@@ -1217,7 +1217,7 @@ async function callTranscriptionProvider(
             body: p.file,
           };
       const r = await mediaFetch(url, 'cloudflare', 'transcription', init);
-      const j = (await readProviderResponseJson(r, MAX_AUDIO_RESPONSE_BYTES)) as {
+      const j = (await readProviderResponseJson(r, MAX_TRANSCRIPTION_RESPONSE_BYTES)) as {
         result?: {
           text?: string;
           vtt?: string;
