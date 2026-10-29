@@ -53,6 +53,12 @@ describe('reasoning-model chat timeouts', () => {
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
       }),
       headers: new Headers(),
+      body: new Response(JSON.stringify({
+        id: 'chatcmpl-cf', object: 'chat.completion', created: 1,
+        model: '@cf/zai-org/glm-4.7-flash',
+        choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      })).body,
     } as unknown as Response);
 
     await provider.chatCompletion(
