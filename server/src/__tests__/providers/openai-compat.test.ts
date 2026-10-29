@@ -262,14 +262,14 @@ describe('OpenAICompatProvider', () => {
 
     it('leaves parallel_tool_calls untouched when there are no tools', async () => {
       let body: any = null;
-      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse; });
+      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse(); });
       await nim().chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm', {});
       expect(body.parallel_tool_calls).toBeUndefined();
     });
 
     it('does not affect providers without the flag (parallel_tool_calls passes through)', async () => {
       let body: any = null;
-      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse; });
+      vi.spyOn(global, 'fetch').mockImplementation(async (_u, init) => { body = JSON.parse((init as any).body); return okResponse(); });
       await provider.chatCompletion('k', [{ role: 'user', content: 'hi' }], 'm', { tools, parallel_tool_calls: true });
       expect(body.parallel_tool_calls).toBe(true);
     });
