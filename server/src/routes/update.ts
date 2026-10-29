@@ -473,7 +473,7 @@ export function createUpdateRouter(options: UpdateRouterOptions = {}): Router {
       throw new Error(`GitHub compare request returned HTTP ${response.status}`);
     }
 
-    const body: unknown = await response.json();
+    const body: unknown = await readProviderResponseJson(response);
     if (!isRecord(body)) throw new Error('GitHub compare response is not an object');
     const upstreamStatus = compareStatus(body.status);
     if (!upstreamStatus) throw new Error('GitHub compare response has an invalid status');
@@ -523,7 +523,7 @@ export function createUpdateRouter(options: UpdateRouterOptions = {}): Router {
       throw new Error(`GitHub latest-release request returned HTTP ${response.status}`);
     }
 
-    const body: unknown = await response.json();
+    const body: unknown = await readProviderResponseJson(response);
     if (!isRecord(body)) throw new Error('GitHub latest-release response is not an object');
     if (typeof body.tag_name !== 'string' || body.tag_name.trim().length === 0) {
       throw new Error('GitHub latest-release response has no tag');
