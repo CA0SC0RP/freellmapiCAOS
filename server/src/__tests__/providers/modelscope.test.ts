@@ -7,29 +7,21 @@ import type { KeyValidationFailure } from '../../providers/base.js';
 // this project yet (auth requires an Alibaba Cloud cn-site account binding).
 const GARBAGE_KEY = 'ms-test-invalid';
 
-const ROSTER = {
-  ok: true,
-  status: 200,
-  json: () => Promise.resolve({
-    object: 'list',
-    data: [
-      { id: 'Qwen/Qwen3-235B-A22B-Instruct-2507', object: 'model' },
-      { id: 'deepseek-ai/DeepSeek-V4-Flash', object: 'model' },
-    ],
-  }),
-};
+const ROSTER = new Response(JSON.stringify({
+  object: 'list',
+  data: [
+    { id: 'Qwen/Qwen3-235B-A22B-Instruct-2507', object: 'model' },
+    { id: 'deepseek-ai/DeepSeek-V4-Flash', object: 'model' },
+  ],
+}), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
 // The verified keyless probe (2026-07-26): a 401 from chat/completions with a
 // garbage Bearer token. The alibaba-binding variant below is the
 // maintainer-documented shape for unbound accounts — unconfirmed until a
 // community tester runs a real token (#581).
-const AUTH_FAILED_401 = {
-  ok: false,
-  status: 401,
-  json: () => Promise.resolve({
-    error: { message: 'please bind your alibaba cloud account before use' },
-  }),
-};
+const AUTH_FAILED_401 = new Response(JSON.stringify({
+  error: { message: 'please bind your alibaba cloud account before use' },
+}), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -90,7 +82,7 @@ describe('ModelScope validateKey (#581)', () => {
           model: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
           choices: [{ index: 0, message: { role: 'assistant', content: 'p' }, finish_reason: 'length' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any; as unknown as Response;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
