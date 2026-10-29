@@ -1,4 +1,5 @@
 import { providerHttpError, type KeyValidationResult } from './base.js';
+import { readProviderResponseJson } from './response-body.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 import { providerTimeoutMs } from '../lib/provider-timeout.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
@@ -27,7 +28,7 @@ export class SpekaProvider extends OpenAICompatProvider {
     recordQuotaObservationsFromResponse(res, { ...quotaContext, platform: 'speka', endpoint: 'key-validation' });
     if ([401, 403].includes(res.status)) return this.validationResult(res);
     if (res.status === 400) {
-      const body = await res.clone().json().catch(() => null) as { error?: { type?: string } } | null;
+      const body = await readProviderResponseJson(res.clone()).catch(() => null) as { error?: { type?: string } } | null;
       if (body?.error?.type === 'model_not_found') return true;
     }
     // Rate limits, exhausted allowances, malformed responses and outages are

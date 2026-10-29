@@ -1,3 +1,4 @@
+import { readProviderResponseJson } from './response-body.js';
 import type {
   ChatMessage,
   ChatContent,
@@ -159,11 +160,11 @@ export class AIHordeProvider extends BaseProvider {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
+      const err = await readProviderResponseJson(res).catch(() => ({}));
       throw providerHttpError(res, `${this.name} API error ${res.status}: ${this.parseError(err, res.status, res.statusText)}`, err);
     }
 
-    const data = await res.json() as ChatCompletionResponse;
+    const data = await readProviderResponseJson(res) as ChatCompletionResponse;
     this.synthesizeUsage(messages, data);
     data._routed_via = { platform: this.platform, model: modelId };
     return data;

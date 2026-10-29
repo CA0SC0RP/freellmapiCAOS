@@ -3,6 +3,7 @@ import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValida
 import { resolveMaxTokens } from '../lib/sampling-params.js';
 import { providerTimeoutMs } from '../lib/provider-timeout.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
+import { readProviderResponseJson, readProviderResponseText } from './response-body.js';
 
 const BASE_URL = 'https://api.moondream.ai/v1';
 const unsupported = (message: string) => Object.assign(new Error(`Moondream ${message}`), { status: 422 });
@@ -71,7 +72,7 @@ export class MoondreamProvider extends BaseProvider {
     this.record(res, 'models', quotaContext);
     if ([401, 403].includes(res.status)) return this.validationResult(res);
     if (!res.ok) throw providerHttpError(res, 'Moondream key validation is temporarily inconclusive');
-    const roster = await res.json() as { data?: unknown };
+    const roster = await readProviderResponseJson<{ data?: unknown }>(res);
     if (!Array.isArray(roster.data)) throw upstreamError('returned an invalid model roster');
     return true;
   }
@@ -84,7 +85,7 @@ export class MoondreamProvider extends BaseProvider {
     { signal: options?.signal, timeoutBounds: stream ? 'headers' : 'request' });
     this.record(res, 'chat/completions', quotaContext, modelId);
     if (!res.ok) {
-      const text = await res.text();
+      const text = await readProviderResponseText(res);
       let detail: unknown = text;
       try { detail = JSON.parse(text); } catch { /* Preserve non-JSON backoff diagnostics. */ }
       throw providerHttpError(res, `Moondream API error ${res.status}: ${text.slice(0, 500)}`, detail);
@@ -95,7 +96,7 @@ export class MoondreamProvider extends BaseProvider {
   async chatCompletion(apiKey: string, messages: ChatMessage[], modelId: string,
     options?: CompletionOptions, quotaContext?: QuotaObservationContext): Promise<ChatCompletionResponse> {
     const res = await this.request(apiKey, messages, modelId, options, false, quotaContext);
-    const data = await res.json() as ChatCompletionResponse;
+    const data = await readProviderResponseJson<ChatCompletionResponse>(res);
     checkModel(modelId, data?.model);
     if (!data.choices?.length) throw upstreamError('returned no completion choices');
     for (const choice of data.choices) {

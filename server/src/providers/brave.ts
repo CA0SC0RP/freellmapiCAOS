@@ -1,4 +1,5 @@
 import type { KeyValidationResult } from './base.js';
+import { readProviderResponseText } from './response-body.js';
 import { SearchOnlyProvider } from './search-only.js';
 import { proxyFetch } from '../lib/proxy.js';
 
@@ -31,7 +32,7 @@ export class BraveProvider extends SearchOnlyProvider {
     } catch (err) {
       return { valid: false, error: `${this.name} key validation inconclusive: ${err instanceof Error ? err.message : String(err)}` };
     }
-    const body = await res.text().catch(() => '');
+    const body = await readProviderResponseText(res).catch(() => '');
     if (res.status === 401 || res.status === 403 || body.includes(BRAVE_BAD_KEY_CODE)) {
       return { valid: false, error: `${this.name} key validation failed (HTTP ${res.status}): invalid API key` };
     }

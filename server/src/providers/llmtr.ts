@@ -1,4 +1,5 @@
 import type { ChatCompletionChunk, ChatCompletionResponse, ChatMessage } from '@freellmapi/shared/types.js';
+import { readProviderResponseJson } from './response-body.js';
 import { providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 import { providerTimeoutMs } from '../lib/provider-timeout.js';
@@ -54,7 +55,7 @@ function checkModel(requested: string, returned: string): void {
  * (#1390) rather than rejecting the key. Reads a clone so the caller's
  * validationResult can still consume the body. */
 async function blocksAutomatedValidation(res: Response): Promise<boolean> {
-  const body = await res.clone().json().catch(() => null) as { error?: { message?: string }; message?: string } | null;
+  const body = await readProviderResponseJson(res.clone()).catch(() => null) as { error?: { message?: string }; message?: string } | null;
   const text = [body?.error?.message, body?.message].filter((v): v is string => typeof v === 'string').join(' ').toLowerCase();
   return text.includes('automated api key validation') || (text.includes('automated') && text.includes('validation'));
 }
@@ -164,7 +165,7 @@ export class LlmtrProvider extends OpenAICompatProvider {
       return this.validationResult(res);
     }
     if (res.status === 404) {
-      const body = await res.clone().json().catch(() => null) as { error?: { type?: string } } | null;
+      const body = await readProviderResponseJson(res.clone()).catch(() => null) as { error?: { type?: string } } | null;
       if (body?.error?.type === 'model_not_found') return true;
     }
     throw providerHttpError(res, 'LLMTR key validation is temporarily inconclusive');

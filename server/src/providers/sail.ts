@@ -1,3 +1,4 @@
+import { readProviderResponseJson } from './response-body.js';
 import type {
   ChatCompletionChunk,
   ChatCompletionResponse,
@@ -223,7 +224,7 @@ export class SailProvider extends BaseProvider {
   }
 
   private async parseResponse(res: Response): Promise<SailResponse> {
-    const body = await res.json().catch(() => ({})) as SailResponse;
+    const body = await readProviderResponseJson(res).catch(() => ({})) as SailResponse;
     if (!res.ok) {
       throw providerHttpError(
         res,

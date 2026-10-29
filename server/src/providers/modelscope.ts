@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readProviderResponseJson } from './response-body.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 import type { KeyValidationResult } from './base.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
@@ -111,7 +112,7 @@ export class ModelScopeProvider extends OpenAICompatProvider {
       // any non-200 as an upstream outage → status='error', never 'invalid'.
       throw new Error(`ModelScope /models returned HTTP ${modelsRes.status} while picking a validation probe model`);
     }
-    const roster = await modelsRes.json().catch(() => null) as { data?: Array<{ id?: string }> } | null;
+    const roster = await readProviderResponseJson(modelsRes).catch(() => null) as { data?: Array<{ id?: string }> } | null;
     const probeModel = roster?.data?.[0]?.id;
     if (!probeModel) {
       throw new Error('ModelScope /models returned no models to probe key validity against');

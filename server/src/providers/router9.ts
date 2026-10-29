@@ -1,4 +1,5 @@
 import type { KeyValidationResult } from './base.js';
+import { readProviderResponseJson } from './response-body.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
 
@@ -30,7 +31,7 @@ export class Router9Provider extends OpenAICompatProvider {
     });
     if (res.status === 401) return this.validationResult(res);
 
-    const body = await res.json().catch(() => null) as { error?: { code?: string } } | null;
+    const body = await readProviderResponseJson(res).catch(() => null) as { error?: { code?: string } } | null;
     const accountHeaders = ['x-credits-limit', 'x-credits-remaining'].every(name => {
       const value = res.headers.get(name);
       return value !== null && value.trim() !== '' && Number.isFinite(Number(value));

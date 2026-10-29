@@ -1,6 +1,6 @@
 import { runInNewContext } from 'node:vm';
 import { describe, it, expect, vi } from 'vitest';
-import { readProviderResponseText, readProviderResponseJson, MAX_PROVIDER_RESPONSE_BYTES, MAX_PROVIDER_STREAM_FRAME_BYTES, assertProviderStreamChunkWithinLimit } from '../../providers/response-body.js';
+import { readProviderResponseText, readProviderResponseJson, readProviderResponseBytes, MAX_PROVIDER_RESPONSE_BYTES, MAX_PROVIDER_STREAM_FRAME_BYTES, assertProviderStreamChunkWithinLimit } from '../../providers/response-body.js';
 
 describe('provider response body size limits', () => {
   it('rejects a response whose Content-Length exceeds the cap', async () => {
@@ -93,5 +93,16 @@ describe('provider streaming frame limits', () => {
   it('accepts a transport chunk within the frame cap', () => {
     expect(() => assertProviderStreamChunkWithinLimit(new Uint8Array(MAX_PROVIDER_STREAM_FRAME_BYTES)))
       .not.toThrow();
+  });
+
+  it('enforces binary response limits before allocating the full body', async () => {
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(8));
+        controller.enqueue(new Uint8Array([1]));
+        controller.close();
+      },
+    }));
+    await expect(readProviderResponseBytes(response, 8)).rejects.toThrow(/exceeded.*byte limit/);
   });
 });

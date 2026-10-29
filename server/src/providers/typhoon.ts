@@ -1,4 +1,5 @@
 import { providerHttpError, type KeyValidationResult } from './base.js';
+import { readProviderResponseJson } from './response-body.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 import { providerTimeoutMs } from '../lib/provider-timeout.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
@@ -25,7 +26,7 @@ export class TyphoonProvider extends OpenAICompatProvider {
     recordQuotaObservationsFromResponse(res, { ...quotaContext, platform: 'typhoon', endpoint: 'key-validation' });
     if ([401, 403].includes(res.status)) return this.validationResult(res);
     if (res.status === 400) {
-      const body = await res.clone().json().catch(() => null) as { detail?: unknown } | null;
+      const body = await readProviderResponseJson(res.clone()).catch(() => null) as { detail?: unknown } | null;
       if (body?.detail === 'Model not found') return true;
     }
     throw providerHttpError(res, 'Typhoon key validation is temporarily inconclusive');

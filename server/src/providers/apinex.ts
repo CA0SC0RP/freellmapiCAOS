@@ -1,4 +1,5 @@
 import type { ChatCompletionChunk, ChatCompletionResponse, ChatMessage } from '@freellmapi/shared/types.js';
+import { readProviderResponseJson } from './response-body.js';
 import { providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 import type { QuotaObservationContext } from '../services/provider-quota.js';
@@ -22,7 +23,7 @@ export class ApinexProvider extends OpenAICompatProvider {
   protected override async validationResult(response: Response): Promise<KeyValidationResult> {
     if ([401, 403].includes(response.status)) return super.validationResult(response);
     if (!response.ok) throw providerHttpError(response, 'APINex key validation is temporarily inconclusive');
-    const body = await response.json().catch(() => null) as { object?: unknown; balance_usd?: unknown; error?: unknown } | null;
+    const body = await readProviderResponseJson(response).catch(() => null) as { object?: unknown; balance_usd?: unknown; error?: unknown } | null;
     if (body?.object !== 'balance' || body.error || typeof body.balance_usd !== 'number' || !Number.isFinite(body.balance_usd)) {
       throw Object.assign(new Error('APINex returned an invalid balance response'), { status: 502 });
     }

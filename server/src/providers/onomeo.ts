@@ -1,4 +1,5 @@
 import type { ChatCompletionChunk, ChatCompletionResponse, ChatMessage } from '@freellmapi/shared/types.js';
+import { readProviderResponseJson } from './response-body.js';
 import { providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
 import type { QuotaObservationContext } from '../services/provider-quota.js';
 import { OpenAICompatProvider } from './openai-compat.js';
@@ -62,7 +63,7 @@ export class OnomeoProvider extends OpenAICompatProvider {
     // 403/429 are quota/throttle verdicts on a valid key (see class docs), and
     // every other failure is an outage — all inconclusive, none key-fatal.
     if (!response.ok) throw providerHttpError(response, 'onomeo key validation is temporarily inconclusive');
-    const body = await response.json().catch(() => null) as { data?: unknown; error?: unknown } | null;
+    const body = await readProviderResponseJson(response).catch(() => null) as { data?: unknown; error?: unknown } | null;
     if (!Array.isArray(body?.data) || body?.error) {
       throw Object.assign(new Error('onomeo returned an invalid model list'), { status: 502 });
     }

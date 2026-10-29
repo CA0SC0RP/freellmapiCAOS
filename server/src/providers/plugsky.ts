@@ -1,4 +1,5 @@
 import { providerHttpError, type KeyValidationResult } from './base.js';
+import { readProviderResponseJson } from './response-body.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 
 export const PLUGSKY_BASE_URL = 'https://plugsky.com/v1';
@@ -19,7 +20,7 @@ export class PlugskyProvider extends OpenAICompatProvider {
     if (!response.ok) {
       throw providerHttpError(response, 'Plugsky key validation is temporarily inconclusive');
     }
-    const body = await response.json().catch(() => null) as { data?: unknown } | null;
+    const body = await readProviderResponseJson(response).catch(() => null) as { data?: unknown } | null;
     if (!body || !Array.isArray(body.data)) {
       throw Object.assign(new Error('Plugsky returned an invalid usage response'), { status: 502 });
     }

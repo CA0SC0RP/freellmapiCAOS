@@ -3,6 +3,7 @@ import { AclideProvider } from '../../providers/aclide.js';
 import { getProvider } from '../../providers/index.js';
 import { AUTH_JSON_PROVIDER_MAP, detectPlatform } from '../../lib/key-parser.js';
 import { isRetryableError } from '../../lib/error-classify.js';
+import { MAX_PROVIDER_RESPONSE_BYTES } from '../../providers/response-body.js';
 
 const model = 'z-ai/glm-4.7-flashx';
 const messages = [{ role: 'user' as const, content: 'Say OK' }];
@@ -162,4 +163,14 @@ describe('ACLIDE Responses adapter', () => {
       expect(isRetryableError(err)).toBe(true);
     }
   });
+
+  it('rejects oversized successful responses before JSON parsing', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response(' '.repeat(MAX_PROVIDER_RESPONSE_BYTES + 1)),
+    );
+    await expect(
+      new AclideProvider().chatCompletion('k', messages, model),
+    ).rejects.toThrow(/exceeded.*byte limit/);
+  });
+
 });

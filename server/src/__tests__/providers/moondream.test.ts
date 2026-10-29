@@ -5,6 +5,7 @@ import { getProvider } from '../../providers/index.js';
 import { AUTH_JSON_PROVIDER_MAP, detectPlatform, parseKeysFromFile } from '../../lib/key-parser.js';
 import { supportedParametersFor } from '../../lib/sampling-params.js';
 import { isRetryableError } from '../../lib/error-classify.js';
+import { MAX_PROVIDER_RESPONSE_BYTES } from '../../providers/response-body.js';
 
 const model = 'moondream3.1-9B-A2B';
 const messages: ChatMessage[] = [{ role: 'user', content: 'Say OK' }];
@@ -160,4 +161,14 @@ describe('Moondream hosted adapter', () => {
     controller.abort();
     await expect(pending).rejects.toThrow();
   });
+
+  it('rejects oversized successful responses before JSON parsing', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response(' '.repeat(MAX_PROVIDER_RESPONSE_BYTES + 1)),
+    );
+    await expect(
+      new MoondreamProvider().chatCompletion('k', messages, model),
+    ).rejects.toThrow(/exceeded.*byte limit/);
+  });
+
 });

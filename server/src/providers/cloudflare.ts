@@ -9,6 +9,7 @@ import { contentToString, contentHasImage } from '../lib/content.js';
 import { extractThinkFromMessage } from '../lib/think-tags.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
 import { providerTimeoutMs } from '../lib/provider-timeout.js';
+import { readProviderResponseJson } from './response-body.js';
 
 /**
  * Cloudflare Workers AI provider.
@@ -103,11 +104,11 @@ export class CloudflareProvider extends BaseProvider {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
+      const err = await readProviderResponseJson(res).catch(() => ({}));
       throw providerHttpError(res, `Cloudflare API error ${res.status}: ${(err as any).error?.message ?? (err as any).errors?.[0]?.message ?? res.statusText}`, err);
     }
 
-    const data = await res.json() as ChatCompletionResponse;
+    const data = await readProviderResponseJson<ChatCompletionResponse>(res);
     // Workers AI hosts DeepSeek-style models that inline their reasoning trace
     // as a leading `<think>…</think>` block in content; move it to
     // reasoning_content (no-op for messages without the tag).
@@ -160,7 +161,7 @@ export class CloudflareProvider extends BaseProvider {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
+      const err = await readProviderResponseJson(res).catch(() => ({}));
       throw providerHttpError(res, `Cloudflare API error ${res.status}: ${(err as any).error?.message ?? (err as any).errors?.[0]?.message ?? res.statusText}`, err);
     }
 
@@ -217,7 +218,7 @@ export class CloudflareProvider extends BaseProvider {
       return { authFailed: await this.validationResult(res) as KeyValidationFailure };
     }
     if (!res.ok) return { result: true }; // unexpected non-2xx that isn't auth — don't disable
-    const data = await res.json() as any;
+    const data = await readProviderResponseJson<any>(res);
     if (data.success === true && data.result?.status === 'active') return { result: true };
     const reason = data.result?.status
       ? `token status is "${data.result.status}"`

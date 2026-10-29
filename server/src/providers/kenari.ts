@@ -1,4 +1,5 @@
 import type { ChatCompletionChunk, ChatCompletionResponse, ChatMessage } from '@freellmapi/shared/types.js';
+import { readProviderResponseJson } from './response-body.js';
 import { providerHttpError, type CompletionOptions, type KeyValidationResult, type ProviderFetchOptions } from './base.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 import type { QuotaObservationContext } from '../services/provider-quota.js';
@@ -38,7 +39,7 @@ export class KenariProvider extends OpenAICompatProvider {
     // Restricted/shared keys cannot read account balance (403); this is not
     // proof the key is invalid. Quota failures and outages are inconclusive too.
     if (!response.ok) throw providerHttpError(response, 'Kenari key validation is temporarily inconclusive');
-    const body = await response.json().catch(() => null) as {
+    const body = await readProviderResponseJson(response).catch(() => null) as {
       object?: unknown; available_micro_idr?: unknown; error?: unknown;
     } | null;
     if (body?.object !== 'account.balance' || body.error ||

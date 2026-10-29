@@ -1,4 +1,5 @@
 import type { ChatCompletionChunk, ChatCompletionResponse, ChatMessage } from '@freellmapi/shared/types.js';
+import { readProviderResponseJson } from './response-body.js';
 import { providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
 import type { QuotaObservationContext } from '../services/provider-quota.js';
 import { OpenAICompatProvider } from './openai-compat.js';
@@ -29,7 +30,7 @@ export class SimpleLLMProvider extends OpenAICompatProvider {
   protected override async validationResult(response: Response): Promise<KeyValidationResult> {
     if ([401, 403].includes(response.status)) return super.validationResult(response);
     if (!response.ok) throw providerHttpError(response, 'SimpleLLM key validation is temporarily inconclusive');
-    const body = await response.json().catch(() => null) as { limit_rpm?: unknown } | null;
+    const body = await readProviderResponseJson(response).catch(() => null) as { limit_rpm?: unknown } | null;
     if (typeof body?.limit_rpm !== 'number' || !Number.isFinite(body.limit_rpm)) {
       throw Object.assign(new Error('SimpleLLM returned an invalid rate-limit response'), { status: 502 });
     }
