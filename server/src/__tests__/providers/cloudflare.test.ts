@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CloudflareProvider } from '../../providers/cloudflare.js';
+import { MAX_PROVIDER_RESPONSE_BYTES } from '../../providers/response-body.js';
 
 describe('CloudflareProvider', () => {
   let provider: CloudflareProvider;
@@ -269,6 +270,16 @@ describe('CloudflareProvider', () => {
       function: { name: 'get_weather', arguments: '{"city":"Mexico City"}' },
     }]);
     expect(result.usage).toEqual({ prompt_tokens: 8, completion_tokens: 3, total_tokens: 11 });
+  });
+
+
+  it('rejects oversized successful responses before JSON parsing', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response(' '.repeat(MAX_PROVIDER_RESPONSE_BYTES + 1)),
+    );
+    await expect(
+      provider.chatCompletion('abc123:token', [{ role: 'user', content: 'Hi' }], '@cf/meta/llama-3.1-70b-instruct'),
+    ).rejects.toThrow(/exceeded.*byte limit/);
   });
 
 });
