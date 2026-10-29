@@ -227,9 +227,7 @@ describe('Streaming usage-frame fallback injection', () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
       if (urlStr.includes('api.groq.com/openai/v1/chat/completions')) {
-        return {
-          ok: true,
-          json: () => Promise.resolve({
+        return new Response(JSON.stringify({
             id: 'chatcmpl-nousage',
             object: 'chat.completion',
             created: 123,
@@ -240,8 +238,7 @@ describe('Streaming usage-frame fallback injection', () => {
               finish_reason: 'stop',
             }],
             // No `usage` block — the #1084 scenario.
-          }),
-        } as any;
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any;
       }
       return origFetch(url, init);
     });
