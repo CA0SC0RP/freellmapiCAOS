@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GoogleProvider } from '../../providers/google.js';
 import { isStreamTruncatedError } from '../../lib/error-classify.js';
+import { MAX_PROVIDER_STREAM_FRAME_BYTES } from '../../providers/response-body.js';
 
 describe('GoogleProvider', () => {
   let provider: GoogleProvider;
@@ -700,6 +701,18 @@ describe('GoogleProvider', () => {
     for await (const c of gen) out.push(c);
     return out;
   }
+
+  it('rejects an oversized Gemini upstream stream chunk before parsing it', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(sseResponse([
+      `data: ${'x'.repeat(MAX_PROVIDER_STREAM_FRAME_BYTES + 1)}`,
+    ]));
+
+    await expect(collect(provider.streamChatCompletion(
+      'test-key',
+      [{ role: 'user', content: 'Hi' }],
+      'gemini-2.5-pro',
+    ))).rejects.toThrow(/exceeded/);
+  });
 
   it('streams text deltas and emits a final stop chunk', async () => {
     vi.spyOn(global, 'fetch').mockResolvedValueOnce(sseResponse([
