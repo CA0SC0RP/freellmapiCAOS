@@ -30,19 +30,32 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Generate ephemeral test-only HTTPS certificates for transport tests.
+      # They are trusted only by Node processes in this CI job; no keys are stored.
+      - name: Prepare ephemeral TLS test certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          TLS_DIR="$RUNNER_TEMP/pinned-provider-tls"
+          mkdir -p "$TLS_DIR"
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TLS_DIR/key.pem" -out "$TLS_DIR/cert.pem" -days 2 -subj "/CN=provider.test" -addext "subjectAltName=DNS:provider.test" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign" -addext "extendedKeyUsage=serverAuth"
+          echo "PINNED_PROVIDER_TEST_CERT=$TLS_DIR/cert.pem" >> "$GITHUB_ENV"
+          echo "PINNED_PROVIDER_TEST_KEY=$TLS_DIR/key.pem" >> "$GITHUB_ENV"
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout "$TLS_DIR/untrusted-key.pem" -out "$TLS_DIR/untrusted-cert.pem" -days 2 -subj "/CN=provider.test" -addext "subjectAltName=DNS:provider.test" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign" -addext "extendedKeyUsage=serverAuth"
+          echo "PINNED_PROVIDER_UNTRUSTED_TEST_CERT=$TLS_DIR/untrusted-cert.pem" >> "$GITHUB_ENV"
+          echo "PINNED_PROVIDER_UNTRUSTED_TEST_KEY=$TLS_DIR/untrusted-key.pem" >> "$GITHUB_ENV"
+          echo "NODE_EXTRA_CA_CERTS=$TLS_DIR/cert.pem" >> "$GITHUB_ENV"
+
       - name: Check migration round trip
         run: npm run test:migrations
 
-      # COVERAGE makes the server suite collect coverage inside this run rather
-      # than running the whole suite a second time. Only the Node 22 leg sets it,
-      # so the Node 20 leg keeps uninstrumented timings. Reporting only.
+      # COVERAGE is reporting only and runs on Node 22 to avoid doubling suite time.
       - name: Run tests
         env:
           COVERAGE: ${{ matrix.node-version == '22' && '1' || '' }}
         run: npm test
 
-      # server + cli only; the client has its own backlog of ESLint violations
-      # and is brought in under a separate change.
+      # server + cli only; the client has its own backlog of ESLint violations.
       - name: Lint
         run: npm run lint
 
