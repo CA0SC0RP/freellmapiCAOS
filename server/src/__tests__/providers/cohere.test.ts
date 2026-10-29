@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CohereProvider } from '../../providers/cohere.js';
+import { MAX_PROVIDER_RESPONSE_BYTES } from '../../providers/response-body.js';
 
 describe('CohereProvider', () => {
   let provider: CohereProvider;
@@ -164,6 +165,16 @@ describe('CohereProvider', () => {
       type: 'function',
       function: { name: 'get_weather', arguments: '{"city":"Mexico City"}' },
     }]);
+  });
+
+  it('rejects oversized successful responses before parsing JSON', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response(' '.repeat(MAX_PROVIDER_RESPONSE_BYTES + 1)),
+    );
+
+    await expect(
+      provider.chatCompletion('test-key', [{ role: 'user', content: 'Hi' }], 'command-a-03-2025'),
+    ).rejects.toThrow(/exceeded.*byte limit/);
   });
 
   it('should validate key', async () => {
