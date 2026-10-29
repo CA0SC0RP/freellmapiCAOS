@@ -97,6 +97,57 @@ export interface VideoResult {
   contentType: string;
 }
 export interface ImageParams { prompt: string; n?: number; size?: string; signal?: AbortSignal }
+
+type MediaCapacity = 'image' | 'video' | 'transcription' | 'audio';
+
+const activeMediaRequests: Record<MediaCapacity, number> = {
+  image: 0,
+  video: 0,
+  transcription: 0,
+  audio: 0,
+};
+
+let activeMediaTotal = 0;
+
+function mediaConcurrencyLimit(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 128) return fallback;
+  return parsed;
+}
+
+/**
+ * Process-local admission control for memory-heavy media operations.
+ * Requests are rejected immediately instead of accumulating in an unbounded
+ * queue; every successful acquisition is released even on errors/abort.
+ */
+async function withMediaCapacity<T>(modality: MediaCapacity, operation: () => Promise<T>): Promise<T> {
+  const globalLimit = mediaConcurrencyLimit('MEDIA_MAX_CONCURRENT', 4);
+  const modalityLimit = mediaConcurrencyLimit(
+    `MEDIA_MAX_CONCURRENT_${modality.toUpperCase()}`,
+    modality === 'video' ? 1 : 2,
+  );
+
+  if (activeMediaTotal >= globalLimit || activeMediaRequests[modality] >= modalityLimit) {
+    throw new MediaError(
+      'Media capacity is temporarily full; retry shortly',
+      503,
+      'media_concurrency_limit',
+      1000,
+    );
+  }
+
+  activeMediaTotal += 1;
+  activeMediaRequests[modality] += 1;
+  try {
+    return await operation();
+  } finally {
+    activeMediaTotal -= 1;
+    activeMediaRequests[modality] -= 1;
+  }
+}
+
 export interface SpeechParams { input: string; voice?: string; format?: string; signal?: AbortSignal }
 export interface VideoParams {
   prompt: string;
@@ -913,7 +964,7 @@ function chainError(modality: MediaModality, lastError: MediaError | null, hints
 }
 
 /** Generate image(s), failing over across providers serving the modality. */
-export async function runImageGeneration(model: string | undefined, params: ImageParams): Promise<ImageResult> {
+async function runImageGenerationInternal(model: string | undefined, params: ImageParams): Promise<ImageResult> {
   const chain = resolveMediaChain(model, 'image');
   let lastError: MediaError | null = null;
   // Only a chain rate limited end to end earns a Retry-After (the soonest).
@@ -954,7 +1005,7 @@ export async function runImageGeneration(model: string | undefined, params: Imag
 /** Generate a video, failing over across catalogued text-to-video providers.
  *  `clientSignal` is the API caller's connection: when it aborts, the in-flight
  *  upstream request is dropped and no further provider is tried. */
-export async function runVideoGeneration(
+async function runVideoGenerationInternal(
   model: string | undefined,
   params: VideoParams,
   clientSignal?: AbortSignal,
@@ -1265,7 +1316,7 @@ async function callTranscriptionProvider(
 /** Transcribe audio, failing over across STT providers. 429s bench the
  *  (platform, model, key) triple through the standard cooldown machinery so a
  *  rate-limited key is skipped on subsequent requests, exactly like chat. */
-export async function runTranscription(model: string | undefined, p: TranscriptionParams): Promise<TranscriptionResult> {
+async function runTranscriptionInternal(model: string | undefined, p: TranscriptionParams): Promise<TranscriptionResult> {
   const chain = resolveTranscriptionChain(model, p.responseFormat);
   const usable = chain.filter(m => p.file.length <= m.maxBytes);
   if (usable.length === 0) {
@@ -1312,7 +1363,7 @@ export async function runTranscription(model: string | undefined, p: Transcripti
 }
 
 /** Synthesize speech, failing over across providers serving the modality. */
-export async function runSpeech(model: string | undefined, params: SpeechParams): Promise<SpeechResult> {
+async function runSpeechInternal(model: string | undefined, params: SpeechParams): Promise<SpeechResult> {
   const chain = resolveMediaChain(model, 'audio');
   let lastError: MediaError | null = null;
   // Only a chain rate limited end to end earns a Retry-After (the soonest).
@@ -1346,4 +1397,29 @@ export async function runSpeech(model: string | undefined, params: SpeechParams)
     }
   }
   throw chainError('audio', lastError, hints);
+}
+
+
+/** Generate images with bounded process-wide and per-modality concurrency. */
+export function runImageGeneration(model: string | undefined, params: ImageParams): Promise<ImageResult> {
+  return withMediaCapacity('image', () => runImageGenerationInternal(model, params));
+}
+
+/** Generate video with bounded process-wide and per-modality concurrency. */
+export function runVideoGeneration(
+  model: string | undefined,
+  params: VideoParams,
+  clientSignal?: AbortSignal,
+): Promise<VideoResult> {
+  return withMediaCapacity('video', () => runVideoGenerationInternal(model, params, clientSignal));
+}
+
+/** Transcribe audio with bounded process-wide and per-modality concurrency. */
+export function runTranscription(model: string | undefined, params: TranscriptionParams): Promise<TranscriptionResult> {
+  return withMediaCapacity('transcription', () => runTranscriptionInternal(model, params));
+}
+
+/** Synthesize speech with bounded process-wide and per-modality concurrency. */
+export function runSpeech(model: string | undefined, params: SpeechParams): Promise<SpeechResult> {
+  return withMediaCapacity('audio', () => runSpeechInternal(model, params));
 }
