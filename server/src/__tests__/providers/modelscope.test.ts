@@ -85,16 +85,12 @@ describe('ModelScope validateKey (#581)', () => {
   it('returns true when the 1-token chat probe authenticates (200)', async () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
       if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
-      return {
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'chatcmpl-1', object: 'chat.completion', created: 1,
           model: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
           choices: [{ index: 0, message: { role: 'assistant', content: 'p' }, finish_reason: 'length' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as unknown as Response;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any; as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
@@ -106,11 +102,7 @@ describe('ModelScope validateKey (#581)', () => {
     // Neither case is an auth failure, so the key must not be disabled.
     vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
       if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
-      return {
-        ok: false,
-        status: 429,
-        json: () => Promise.resolve({ error: { message: 'Request limit exceeded' } }),
-      } as unknown as Response;
+      return new Response(JSON.stringify({ error: { message: 'Request limit exceeded' } }), { status: 429, headers: { 'Content-Type': 'application/json' } }) as any; as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
@@ -142,16 +134,12 @@ describe('ModelScope validateKey (#581)', () => {
   it('caches a successful validation per key and skips the network on repeat checks', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
       if (String(url).endsWith('/models')) return ROSTER as unknown as Response;
-      return {
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({
+      return new Response(JSON.stringify({
           id: 'chatcmpl-1', object: 'chat.completion', created: 1,
           model: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
           choices: [{ index: 0, message: { role: 'assistant', content: 'p' }, finish_reason: 'length' }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-        }),
-      } as unknown as Response;
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }) as any; as unknown as Response;
     });
 
     const provider = new ModelScopeProvider();
