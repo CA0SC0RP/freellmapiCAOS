@@ -30,11 +30,6 @@ export function createInferenceAdmission(maxConcurrent: number) {
 
     res.once('finish', release);
     res.once('close', release);
-    try {
-      next();
-    } catch (err) {
-      release();
-      next(err);
-    }
+    next();
   };
 }
