@@ -11,6 +11,7 @@ import type { ExtendedSamplingOptions } from '../lib/sampling-params.js';
 import { proxyFetch } from '../lib/proxy.js';
 import { providerTimeoutMs, streamStallTimeoutMs } from '../lib/provider-timeout.js';
 import { extractThinkTagsFromStream } from '../lib/think-tags.js';
+import { readProviderResponseJson } from './response-body.js';
 
 /** A provider HTTP error carrying the upstream status and, when the provider
  *  stated one, the parsed back-off so the router can bench the key for at least
@@ -316,7 +317,7 @@ export abstract class BaseProvider {
 
     let body: any = null;
     try {
-      if (typeof (res as any).json === 'function') body = await res.json();
+      if (typeof (res as any).json === 'function') body = await readProviderResponseJson(res);
     } catch {
       // A status and provider name are still more useful than no reason.
     }
