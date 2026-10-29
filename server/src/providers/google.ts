@@ -8,7 +8,7 @@ import type {
   TokenUsage,
 } from '@freellmapi/shared/types.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
-import { MAX_PROVIDER_STREAM_FRAME_BYTES, readProviderResponseJson } from './response-body.js';
+import { MAX_PROVIDER_STREAM_FRAME_BYTES, assertProviderStreamChunkWithinLimit, readProviderResponseJson } from './response-body.js';
 import { contentToString } from '../lib/content.js';
 import { proxyFetch } from '../lib/proxy.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
@@ -728,10 +728,8 @@ export class GoogleProvider extends BaseProvider {
         // Reject oversized transport chunks before decoding/concatenating them.
         // This conservatively bounds transient string allocation as well as the
         // pending line buffer; compliant providers normally emit small SSE chunks.
-        if (value.byteLength > MAX_PROVIDER_STREAM_FRAME_BYTES ||
-            new TextEncoder().encode(buffer).byteLength + value.byteLength > MAX_PROVIDER_STREAM_FRAME_BYTES) {
-          throw new Error(`${this.name} stream frame exceeded the ${MAX_PROVIDER_STREAM_FRAME_BYTES}-byte limit`);
-        }
+        assertProviderStreamChunkWithinLimit(value);
+
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
