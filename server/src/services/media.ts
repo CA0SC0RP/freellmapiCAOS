@@ -1230,7 +1230,7 @@ async function callTranscriptionProvider(
             headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${token}` },
             body: p.file,
           };
-      const r = await mediaFetch(url, 'cloudflare', 'transcription', init);
+      const r = await mediaFetch(url, 'cloudflare', 'transcription', init, FETCH_TIMEOUT_MS, p.signal);
       const j = (await readProviderResponseJson(r, MAX_TRANSCRIPTION_RESPONSE_BYTES)) as {
         result?: {
           text?: string;
