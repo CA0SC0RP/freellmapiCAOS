@@ -76,7 +76,7 @@ function mockGroq(responses: any[]) {
       bodies.push(JSON.parse(String((init as RequestInit).body)));
       const next = responses.shift();
       if (!next) throw new Error('no mocked Groq response left');
-      return { ok: true, json: () => Promise.resolve(next) } as any;
+      return new Response(JSON.stringify(next), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     return origFetch(url as any, init);
   });
