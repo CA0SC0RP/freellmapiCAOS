@@ -5,6 +5,7 @@ import type {
   ChatToolDefinition,
 } from '@freellmapi/shared/types.js';
 import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
+import { readProviderResponseJson } from './response-body.js';
 import { extendedBodyParams, resolveMaxTokens } from '../lib/sampling-params.js';
 import { flattenMessageContent } from '../lib/content.js';
 import { recordQuotaObservationsFromResponse, type QuotaObservationContext } from '../services/provider-quota.js';
@@ -72,11 +73,11 @@ export class CohereProvider extends BaseProvider {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
+      const err = await readProviderResponseJson(res).catch(() => ({}));
       throw providerHttpError(res, `Cohere API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`, err);
     }
 
-    const data = await res.json() as ChatCompletionResponse;
+    const data = await readProviderResponseJson<ChatCompletionResponse>(res);
     data._routed_via = { platform: 'cohere', model: modelId };
     return data;
   }
@@ -121,7 +122,7 @@ export class CohereProvider extends BaseProvider {
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
+      const err = await readProviderResponseJson(res).catch(() => ({}));
       throw providerHttpError(res, `Cohere API error ${res.status}: ${(err as any).error?.message ?? res.statusText}`, err);
     }
 
