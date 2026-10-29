@@ -1219,7 +1219,8 @@ describe('OpenCode session header (#1639)', () => {
     const encoder = new TextEncoder();
     vi.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
       (global as any).__lastHeaders = (init as any).headers;
-      if (String(_url).includes('api.groq.com')) {
+      const requestUrl = _url instanceof Request ? _url.url : String(_url);
+      if (requestUrl.includes('api.groq.com')) {
         return new Response(JSON.stringify({
           id: 'x', object: 'chat.completion', created: 1, model: 'm',
           choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
