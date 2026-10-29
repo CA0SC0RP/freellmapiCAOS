@@ -205,6 +205,11 @@ const MAX_IMAGE_RESPONSE_BYTES = 32 * 1024 * 1024;
 const MAX_AUDIO_RESPONSE_BYTES = 64 * 1024 * 1024;
 const MAX_VIDEO_RESPONSE_BYTES = 256 * 1024 * 1024;
 const MAX_TRANSCRIPTION_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+/** Create a Buffer view over already-bounded bytes without copying large media payloads. */
+function bufferView(bytes: Uint8Array): Buffer {
+  return Buffer.from(bytes.buffer as ArrayBuffer, bytes.byteOffset, bytes.byteLength);
+}
 // Video providers submit long-running jobs and can legitimately need several
 // minutes before the MP4 is ready. This is still bounded end-to-end.
 const VIDEO_FETCH_TIMEOUT_MS = 5 * 60_000;
@@ -450,7 +455,7 @@ async function callImageProvider(
       // Keyless GET image endpoint returns raw image bytes.
       const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(p.prompt)}?width=${w}&height=${h}&nologo=true&model=${encodeURIComponent(row.model_id)}`;
       const r = await mediaFetch(url, 'pollinations', 'image', { method: 'GET' });
-      const buf = Buffer.from(await readProviderResponseBytes(r, MAX_IMAGE_RESPONSE_BYTES));
+      const buf = bufferView(await readProviderResponseBytes(r, MAX_IMAGE_RESPONSE_BYTES));
       return [{ b64_json: buf.toString('base64') }];
     }
     case 'cloudflare': {
@@ -488,7 +493,7 @@ async function callImageProvider(
         if (!b64) throw new MediaError('cloudflare returned no image', 502);
         return [{ b64_json: b64 }];
       }
-      const buf = Buffer.from(await readProviderResponseBytes(r, MAX_IMAGE_RESPONSE_BYTES));
+      const buf = bufferView(await readProviderResponseBytes(r, MAX_IMAGE_RESPONSE_BYTES));
       return [{ b64_json: buf.toString('base64') }];
     }
     case 'siliconflow': {
@@ -583,7 +588,7 @@ async function callHuggingFaceVideo(
     throw new MediaError(`huggingface returned an unusable video URL: ${verdict.reason}`, 502);
   }
   const downloaded = await mediaFetch(videoUrl, 'huggingface', 'video', { method: 'GET' }, remaining(), clientSignal);
-  const video = Buffer.from(await readProviderResponseBytes(downloaded, MAX_VIDEO_RESPONSE_BYTES));
+  const video = bufferView(await readProviderResponseBytes(downloaded, MAX_VIDEO_RESPONSE_BYTES));
   return {
     video,
     contentType: downloaded.headers.get('content-type') ?? result.video?.content_type ?? 'video/mp4',
@@ -626,7 +631,7 @@ async function callVideoProvider(
         clientSignal,
       );
       return {
-        video: Buffer.from(await readProviderResponseBytes(r, MAX_VIDEO_RESPONSE_BYTES)), 
+        video: bufferView(await readProviderResponseBytes(r, MAX_VIDEO_RESPONSE_BYTES)), 
         contentType: r.headers.get('content-type') ?? 'video/mp4',
       };
     }
@@ -730,7 +735,7 @@ async function callSpeechProvider(
         headers: { 'Content-Type': 'application/json', ...bearerAuthHeader(key) },
         body: JSON.stringify({ model: row.model_id, input: p.input, voice, response_format: format }),
       });
-      const audio = Buffer.from(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES));
+      const audio = bufferView(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES));
       const wav = audio.length > 44 && audio.toString('ascii', 0, 4) === 'RIFF'
         && audio.toString('ascii', 8, 12) === 'WAVE';
       const mp3 = audio.length > 10 && (audio.toString('ascii', 0, 3) === 'ID3'
@@ -750,7 +755,7 @@ async function callSpeechProvider(
         body: JSON.stringify(body),
       });
       return {
-        audio: Buffer.from(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES)), 
+        audio: bufferView(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES)), 
         contentType: r.headers.get('content-type') ?? contentTypeFor(fmt),
       };
     }
@@ -780,7 +785,7 @@ async function callSpeechProvider(
           response_format: fmt,
         }),
       });
-      return { audio: Buffer.from(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES)),  contentType: contentTypeFor(fmt) };
+      return { audio: bufferView(await readProviderResponseBytes(r, MAX_AUDIO_RESPONSE_BYTES)),  contentType: contentTypeFor(fmt) };
     }
     case 'pollinations': {
       // OpenAI-shaped chat-completions with the audio modality returns b64 audio.
