@@ -220,7 +220,7 @@ describe('GoogleProvider', () => {
           controller.close();
         },
       });
-      return { ok: true, body: stream } as any;
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) as any;
     });
 
     const chunks: any[] = [];
@@ -638,7 +638,7 @@ describe('GoogleProvider', () => {
         controller.close();
       },
     });
-    return { ok: true, body: stream };
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
   }
 
   async function collect<T>(gen: AsyncGenerator<T>): Promise<T[]> {
