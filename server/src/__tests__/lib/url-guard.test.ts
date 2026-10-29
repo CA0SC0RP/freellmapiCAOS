@@ -50,6 +50,8 @@ describe('classifyIp', () => {
   it('classifies non-global IPv6 special-use ranges as reserved', () => {
     expect(classifyIp('ff02::1')).toBe('reserved');
     expect(classifyIp('2001:db8::1')).toBe('reserved');
+    expect(classifyIp('2001::1')).toBe('reserved');
+    expect(classifyIp('2002:0a00:0001::1')).toBe('reserved'); // 6to4 embedding 10.0.0.1
     expect(classifyIp('3fff::1')).toBe('reserved');
     expect(classifyIp('100::1')).toBe('reserved');
     expect(classifyIp('2002:a9fe:a9fe::1')).toBe('metadata');
