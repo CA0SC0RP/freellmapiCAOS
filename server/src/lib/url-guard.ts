@@ -131,13 +131,15 @@ function classifyIpv6(ip: string): AddressClass {
   if ((h0 & 0xffc0) === 0xfe80) return 'link-local'; // fe80::/10
   if ((h0 & 0xfe00) === 0xfc00) return 'private'; // fc00::/7 (ULA)
   if ((h0 & 0xff00) === 0xff00) return 'reserved'; // ff00::/8 multicast
+  if (h0 === 0x2001 && (h1 & 0xfe00) === 0) return 'reserved'; // 2001::/23 special-purpose space
   if (h0 === 0x2001 && h1 === 0x0db8) return 'reserved'; // 2001:db8::/32 documentation
   if (h0 === 0x3fff && (h1 & 0xfff0) === 0) return 'reserved'; // 3fff::/20 documentation
   if (h0 === 0x2002) {
     // 6to4 embeds an IPv4 destination in bits 16–47. Apply the IPv4 policy
     // to the embedded address so a public IPv6 wrapper cannot mask an
     // internal or otherwise non-public IPv4 target.
-    return classifyIpv4(`${h1 >> 8}.${h1 & 0xff}.${h2 >> 8}.${h2 & 0xff}`);
+    const embeddedClass = classifyIpv4(`${h1 >> 8}.${h1 & 0xff}.${h2 >> 8}.${h2 & 0xff}`);
+    return embeddedClass === 'private' || embeddedClass === 'loopback' ? 'reserved' : embeddedClass;
   }
   // Only global-unicast 2000::/3 is considered public by this guard. This
   // deliberately blocks other special-use IPv6 space by default.
