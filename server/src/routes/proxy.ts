@@ -42,6 +42,7 @@ import { claudeFamilyDiscoveryEntries, resolveListedClaudeAlias } from '../servi
 import { compressRequest, formatCompressionHeader } from '../services/compression/pipeline.js';
 import { applyDecisionRouting, routingStrategyHeader } from '../services/routing-decision.js';
 import { startStreamKeepalive, streamKeepaliveMs } from '../lib/stream-keepalive.js';
+import { StreamOutputBudget } from '../lib/stream-output-budget.js';
 
 export const proxyRouter = Router();
 
@@ -2585,13 +2586,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     // remembered per-session so a follow-up whose client stripped the field
     // can have it restored (see restore block above).
     let streamReasoning = '';
-    let streamOutputBytes = 0;
-    const accountStreamOutput = (value: string) => {
-      streamOutputBytes += Buffer.byteLength(value, 'utf8');
-      if (streamOutputBytes > MAX_STREAM_OUTPUT_BYTES) {
-        throw new Error(`provider stream exceeded the ${MAX_STREAM_OUTPUT_BYTES}-byte output safety limit`);
-      }
-    };
+    const streamOutputBudget = new StreamOutputBudget(MAX_STREAM_OUTPUT_BYTES);
+    const accountStreamOutput = (value: string) => streamOutputBudget.add(value);
     // Extra input tokens the injected handoff adds on this turn (0 when not
     // injected). Folded into the streaming success accounting, where token
     // counts are estimated; the non-stream path uses the provider's usage,
