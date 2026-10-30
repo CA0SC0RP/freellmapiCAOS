@@ -262,6 +262,8 @@ describe('Backups API', () => {
     try {
       delete process.env.FREEAPI_SQL_BACKUP_MAX_BYTES;
       expect(maxSqlBackupBytes()).toBe(256 * 1024 * 1024);
+      process.env.FREEAPI_SQL_BACKUP_MAX_BYTES = '536870913';
+      expect(maxSqlBackupBytes()).toBe(256 * 1024 * 1024);
       process.env.FREEAPI_SQL_BACKUP_MAX_BYTES = '1048576';
       db.exec('CREATE TABLE backup_memory_limit_test (payload TEXT NOT NULL)');
       db.prepare('INSERT INTO backup_memory_limit_test (payload) VALUES (?)').run('x'.repeat(1024 * 1024));
