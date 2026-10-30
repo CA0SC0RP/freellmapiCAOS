@@ -295,7 +295,25 @@ export async function restoreDbBackupIfNeeded(dbPath = getDefaultDbPath()): Prom
   return { ok: true, target, bytes: restored.length, restored: true };
 }
 
-export async function backupDbNow(db: Db, dbPath = getDefaultDbPath()): Promise<DbBackupResult> {
+let activeBackupPromise: Promise<DbBackupResult> | null = null;
+
+/**
+ * Deduplicate concurrent scheduled/manual backup requests. Compression and
+ * encryption hold several large buffers at once, so a second invocation must
+ * join the in-flight operation rather than repeat the full allocation.
+ */
+export function backupDbNow(db: Db, dbPath = getDefaultDbPath()): Promise<DbBackupResult> {
+  if (activeBackupPromise) return activeBackupPromise;
+  const operation = performDbBackupNow(db, dbPath);
+  activeBackupPromise = operation;
+  void operation.then(
+    () => { if (activeBackupPromise === operation) activeBackupPromise = null; },
+    () => { if (activeBackupPromise === operation) activeBackupPromise = null; },
+  );
+  return operation;
+}
+
+async function performDbBackupNow(db: Db, dbPath: string): Promise<DbBackupResult> {
   const target = backupTarget();
   if (!target) return { ok: true, skipped: 'not configured' };
   if (dbPath === ':memory:') return { ok: true, target, skipped: 'memory database' };
