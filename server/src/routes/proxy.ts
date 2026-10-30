@@ -183,8 +183,23 @@ const STICKY_TTL_MS = 30 * 60 * 1000; // 30 min session TTL
 // is only ever replayed to that same platform+model, so a session that fails
 // over (or auto-routes elsewhere on the next turn) never carries one model's
 // thinking into another provider's payload.
-const reasoningMemory = new Map<string, { reasoning: string; modelKey: string; lastUsed: number }>();
+const reasoningMemory = new Map<string, { reasoning: string; modelKey: string; lastUsed: number; sizeBytes: number }>();
 const REASONING_TTL_MS = 30 * 60 * 1000; // 30 min, matching sticky sessions
+const REASONING_MAX_ENTRY_BYTES = 2 * 1024 * 1024;
+const REASONING_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+let reasoningMemoryBytes = 0;
+
+function removeRememberedReasoning(sessionKey: string): void {
+  const entry = reasoningMemory.get(sessionKey);
+  if (!entry) return;
+  reasoningMemory.delete(sessionKey);
+  reasoningMemoryBytes = Math.max(0, reasoningMemoryBytes - entry.sizeBytes);
+}
+
+/** Test visibility for the process-local reasoning cache's memory ceiling. */
+export function __getReasoningMemoryStatsForTests(): { entries: number; bytes: number } {
+  return { entries: reasoningMemory.size, bytes: reasoningMemoryBytes };
+}
 
 // Platforms that reject an assistant turn WITHOUT `reasoning_content` once the
 // conversation is in thinking mode, i.e. where the field has to be present on
@@ -194,22 +209,29 @@ const REASONING_TTL_MS = 30 * 60 * 1000; // 30 min, matching sticky sessions
 // touched, so no other provider's bytes change.
 const PLATFORMS_REQUIRING_REASONING_ECHO = new Set(['opencode']);
 
-function rememberReasoning(sessionKey: string | undefined, modelKey: string, reasoning: string) {
+export function rememberReasoning(sessionKey: string | undefined, modelKey: string, reasoning: string) {
   if (!sessionKey || !reasoning) return;
-  reasoningMemory.set(sessionKey, { reasoning, modelKey, lastUsed: Date.now() });
-  if (reasoningMemory.size > 500) {
+  const sizeBytes = Buffer.byteLength(reasoning, 'utf8') + 256;
+  if (sizeBytes > REASONING_MAX_ENTRY_BYTES) return;
+
+  // Refresh existing sessions to MRU and keep an exact running byte total.
+  removeRememberedReasoning(sessionKey);
+  reasoningMemory.set(sessionKey, { reasoning, modelKey, lastUsed: Date.now(), sizeBytes });
+  reasoningMemoryBytes += sizeBytes;
+
+  if (reasoningMemory.size > 500 || reasoningMemoryBytes > REASONING_MAX_TOTAL_BYTES) {
     const now = Date.now();
     for (const [key, entry] of reasoningMemory) {
-      if (now - entry.lastUsed > REASONING_TTL_MS) reasoningMemory.delete(key);
+      if (now - entry.lastUsed > REASONING_TTL_MS) removeRememberedReasoning(key);
     }
+  }
 
-    // Hard cap: traces are far bigger than a sticky entry, so an all-fresh map
-    // must not grow without bound. Evict oldest by lastUsed, as setStickyModel does.
-    if (reasoningMemory.size > 1000) {
-      const entries = [...reasoningMemory.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
-      const toEvict = reasoningMemory.size - 1000;
-      for (let i = 0; i < toEvict; i++) reasoningMemory.delete(entries[i][0]);
-    }
+  // Enforce both entry and byte ceilings, evicting the least-recently-used
+  // reasoning traces first. The map is kept in the same order as lastUsed.
+  while (reasoningMemory.size > 1000 || reasoningMemoryBytes > REASONING_MAX_TOTAL_BYTES) {
+    const oldest = reasoningMemory.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    removeRememberedReasoning(oldest);
   }
 }
 
@@ -218,6 +240,7 @@ function rememberReasoning(sessionKey: string | undefined, modelKey: string, rea
 // An expired entry is dropped on read rather than left for the size sweep.
 export function clearReasoningMemory() {
   reasoningMemory.clear();
+  reasoningMemoryBytes = 0;
   stickySessionMap.clear();
 }
 
@@ -226,7 +249,7 @@ function rememberedReasoningFor(sessionKey: string, modelKey: string): string | 
   const entry = reasoningMemory.get(sessionKey);
   if (!entry) return undefined;
   if (Date.now() - entry.lastUsed > REASONING_TTL_MS) {
-    reasoningMemory.delete(sessionKey);
+    removeRememberedReasoning(sessionKey);
     return undefined;
   }
   return entry.modelKey === modelKey ? entry.reasoning : undefined;
