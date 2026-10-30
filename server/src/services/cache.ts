@@ -109,6 +109,9 @@ export function cacheMaxEntries(): number {
   return Math.floor(envNum('RESPONSE_CACHE_MAX_ENTRIES', 5000));
 }
 
+/** Maximum serialized JSON response retained by one cache entry. */
+export const JSON_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+
 // A request is cacheable only when its temperature is omitted (caller accepts
 // the provider default and is fine with a stable answer) or at/below the cap.
 export function isCacheableTemperature(temperature?: number | null): boolean {
@@ -498,6 +501,10 @@ export function storeCachedResponse(cacheKey: string, input: StoreInput, now = D
   } catch {
     return;
   }
+  // Entry count alone is not a memory bound: one unusually large completion
+  // could otherwise pin hundreds of megabytes until TTL/LRU eviction. Keep the
+  // JSON cache aligned with the stream replay ceiling and skip oversized data.
+  if (Buffer.byteLength(bodyJson, 'utf8') > JSON_CACHE_MAX_BYTES) return;
 
   // Delete-then-set so an overwrite also refreshes recency order. Any hits
   // still waiting to be flushed counted the old answer, not this one.
