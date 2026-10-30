@@ -263,29 +263,61 @@ function sqliteCreateTable(db: Db, table: string): string | null {
   return `${row.sql.replace(/^CREATE TABLE/i, 'CREATE TABLE IF NOT EXISTS')};`;
 }
 
-function sqliteDumpTable(db: Db, table: string): string {
-  const columns = (db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map((c) => c.name);
-  const rows = db.prepare(`SELECT * FROM "${table}"`).all() as Record<string, unknown>[];
-  const lines: string[] = [`DELETE FROM "${table}";`];
-  if (rows.length > 0) {
-    const columnList = columns.map((c) => `"${c}"`).join(', ');
-    const valueRows = rows.map((row) => `(${columns.map((c) => sqliteEscape(row[c])).join(', ')})`);
-    lines.push(`INSERT INTO "${table}" (${columnList}) VALUES\n  ${valueRows.join(',\n  ')};`);
-  }
-  return lines.join('\n');
+const DEFAULT_SQL_BACKUP_MAX_BYTES = 256 * 1024 * 1024;
+const SQL_BACKUP_BATCH_ROWS = 250;
+
+/** Maximum SQL dump size; bounds both export output and restore input. */
+export function maxSqlBackupBytes(): number {
+  const raw = process.env.FREEAPI_SQL_BACKUP_MAX_BYTES;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_SQL_BACKUP_MAX_BYTES;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 1024 * 1024 && value <= 2 * 1024 * 1024 * 1024
+    ? value
+    : DEFAULT_SQL_BACKUP_MAX_BYTES;
 }
 
-// No BEGIN/COMMIT in the body: restore runs the whole file inside one
-// db.transaction() so a failure halfway through rolls the database back to
-// where it started, and a nested BEGIN would abort that.
-function sqliteDump(db: Db, tables: string[], createdAt: string): string {
-  const lines = [renderHeader(db, tables, createdAt)];
-  for (const table of tables) {
-    const create = sqliteCreateTable(db, table);
-    if (create) lines.push(create);
-    lines.push(sqliteDumpTable(db, table));
+function writeDumpChunk(fd: number, chunk: string, state: { bytes: number; maxBytes: number }): void {
+  const size = Buffer.byteLength(chunk, 'utf8');
+  if (state.bytes + size > state.maxBytes) {
+    throw httpError(`SQL backup exceeds FREEAPI_SQL_BACKUP_MAX_BYTES (${state.maxBytes} bytes)`, 413);
   }
-  return `${lines.join('\n')}\n`;
+  fs.writeSync(fd, chunk, undefined, 'utf8');
+  state.bytes += size;
+}
+
+/**
+ * Stream a dump to disk in bounded batches. The old implementation called
+ * SELECT * .all() and then built a second full SQL string, retaining the
+ * complete table rows and the rendered dump simultaneously.
+ */
+function writeSqliteDump(db: Db, tables: string[], createdAt: string, filepath: string): number {
+  const fd = fs.openSync(filepath, 'wx', 0o600);
+  const state = { bytes: 0, maxBytes: maxSqlBackupBytes() };
+  try {
+    writeDumpChunk(fd, renderHeader(db, tables, createdAt) + '\\n', state);
+    for (const table of tables) {
+      const create = sqliteCreateTable(db, table);
+      if (create) writeDumpChunk(fd, create + '\\n', state);
+      const columns = (db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map((c) => c.name);
+      writeDumpChunk(fd, `DELETE FROM "${table}";\\n`, state);
+      if (columns.length === 0) continue;
+      const columnList = columns.map((c) => `"${c}"`).join(', ');
+      let offset = 0;
+      for (;;) {
+        const rows = db.prepare(`SELECT * FROM "${table}" LIMIT ? OFFSET ?`)
+          .all(SQL_BACKUP_BATCH_ROWS, offset) as Record<string, unknown>[];
+        if (rows.length === 0) break;
+        const valueRows = rows.map((row) => `(${columns.map((c) => sqliteEscape(row[c])).join(', ')})`);
+        writeDumpChunk(fd, `INSERT INTO "${table}" (${columnList}) VALUES\\n  ${valueRows.join(',\\n  ')};\\n`, state);
+        offset += rows.length;
+        if (rows.length < SQL_BACKUP_BATCH_ROWS) break;
+      }
+    }
+    fs.fsyncSync(fd);
+    return state.bytes;
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -315,10 +347,16 @@ export function createBackup(
   const dir = resolveBackupDir(db, opts.backupPath ?? readBackupSchedule().backupPath);
   const filepath = path.join(dir, filename);
 
-  fs.writeFileSync(filepath, sqliteDump(db, tables, createdAt), { encoding: 'utf8', mode: 0o600 });
-  restrictToOwner(filepath);
-
-  const filesize = fs.statSync(filepath).size;
+  const tempPath = `${filepath}.tmp-${crypto.randomBytes(6).toString('hex')}`;
+  let filesize: number;
+  try {
+    filesize = writeSqliteDump(db, tables, createdAt, tempPath);
+    fs.renameSync(tempPath, filepath);
+    restrictToOwner(filepath);
+  } catch (err) {
+    try { fs.unlinkSync(tempPath); } catch { /* partial dump cleanup is best-effort */ }
+    throw err;
+  }
   const result = db.prepare(
     'INSERT INTO backups (filename, filepath, filesize, is_full, source, created_at, tables_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
   ).run(filename, filepath, filesize, isFull ? 1 : 0, source, createdAt, JSON.stringify(tables));
@@ -486,6 +524,10 @@ export function restoreBackup(db: Db, id: number): RestoreResult {
     throw httpError('Backup file is missing', 404);
   }
 
+  const dumpSize = fs.statSync(filePath).size;
+  if (dumpSize > maxSqlBackupBytes()) {
+    throw httpError(`SQL backup exceeds FREEAPI_SQL_BACKUP_MAX_BYTES (${maxSqlBackupBytes()} bytes)`, 413);
+  }
   const sql = fs.readFileSync(filePath, 'utf8');
   const header = parseHeader(sql);
 
