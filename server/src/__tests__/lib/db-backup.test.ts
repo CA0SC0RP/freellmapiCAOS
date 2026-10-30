@@ -323,6 +323,28 @@ describe('database backup memory ceiling', () => {
     }
   });
 
+  it('coalesces concurrent backup requests into one memory-heavy operation', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-backup-coalesce-'));
+    const dbPath = path.join(dir, 'freeapi.db');
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.FREEAPI_DB_BACKUP_TARGET = 'https://storage.example.com/backup.bin';
+    process.env.FREEAPI_DB_BACKUP_TOKEN = 'backup_token';
+    const fetchMock = vi.fn(async () => {
+      await new Promise(resolve => setTimeout(resolve, 25));
+      return new Response('', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const db = new Database(dbPath);
+    db.exec('CREATE TABLE items (name TEXT NOT NULL); INSERT INTO items (name) VALUES (\'single-flight\')');
+    const first = backupDbNow(db, dbPath);
+    const second = backupDbNow(db, dbPath);
+    expect(second).toBe(first);
+    await Promise.all([first, second]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    db.close();
+  });
+
   it('refuses to read a local database above the configured cap', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-backup-cap-'));
     const dbPath = path.join(dir, 'large.db');
