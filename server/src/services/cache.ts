@@ -321,6 +321,7 @@ function removeJsonEntry(key: string): void {
   if (!entry) return;
   store.delete(key);
   retainedCacheBytes = Math.max(0, retainedCacheBytes - entry.sizeBytes);
+  dirtyHitCounts.delete(key);
 }
 
 function removeStreamEntry(key: string): void {
@@ -389,12 +390,19 @@ let lookupMisses = 0;
 // in-memory map is already correct by then, and a crash in the gap only costs
 // a cache entry. Individually wrapped so one bad write cannot take down the
 // drain, and skipped entirely when persistence is off.
-const pendingWrites: Array<() => void> = [];
+const MAX_PENDING_WRITES = 1024;
+const MAX_PENDING_WRITE_BYTES = 8 * 1024 * 1024;
+const pendingWrites: Array<{ op: () => void; bytes: number }> = [];
+let pendingWriteBytes = 0;
 let drainScheduled = false;
 
-function schedulePersist(op: () => void): void {
+function schedulePersist(op: () => void, estimatedBytes = 256): void {
   if (!cachePersistenceEnabled()) return;
-  pendingWrites.push(op);
+  // Cache persistence is best-effort. Never let a slow SQLite write path
+  // accumulate closures retaining response bodies without a memory ceiling.
+  if (pendingWrites.length >= MAX_PENDING_WRITES || pendingWriteBytes + estimatedBytes > MAX_PENDING_WRITE_BYTES) return;
+  pendingWrites.push({ op, bytes: estimatedBytes });
+  pendingWriteBytes += estimatedBytes;
   if (drainScheduled) return;
   drainScheduled = true;
   setImmediate(drainPendingWrites);
@@ -403,9 +411,10 @@ function schedulePersist(op: () => void): void {
 function drainPendingWrites(): void {
   drainScheduled = false;
   const ops = pendingWrites.splice(0, pendingWrites.length);
-  for (const op of ops) {
+  pendingWriteBytes = 0;
+  for (const item of ops) {
     try {
-      op();
+      item.op();
     } catch {
       // best-effort: a DB failure degrades to memory-only, never to a 500
     }
@@ -435,7 +444,7 @@ function scheduleHitCountFlush(): void {
     schedulePersist(() => {
       const stmt = getDb().prepare('UPDATE response_cache SET hit_count = ?, last_hit_at_ms = ? WHERE cache_key = ?');
       for (const [cacheKey, hit] of batch) stmt.run(hit.hitCount, hit.lastHitAtMs, cacheKey);
-    });
+    }, batch.size * 64);
   }, HIT_FLUSH_DELAY_MS);
   hitFlushTimer.unref();
 }
@@ -599,7 +608,7 @@ export function storeCachedResponse(cacheKey: string, input: StoreInput, now = D
       entry.lastHitAtMs,
       expiresAtMs,
     );
-  });
+  }, Buffer.byteLength(bodyJson, 'utf8') + 256);
 }
 
 /**
@@ -847,6 +856,7 @@ export function clearCache(): number {
   streamStore.clear();
   retainedCacheBytes = 0;
   pendingWrites.length = 0;
+  pendingWriteBytes = 0;
   dropPendingHitCounts();
   // The lookup tallies describe the cache that just went away; keeping them
   // would show a 90% hit rate next to zero entries right after a flush.
