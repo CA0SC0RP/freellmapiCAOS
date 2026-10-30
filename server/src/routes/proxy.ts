@@ -244,7 +244,7 @@ export function clearReasoningMemory() {
   stickySessionMap.clear();
 }
 
-function rememberedReasoningFor(sessionKey: string, modelKey: string): string | undefined {
+export function rememberedReasoningFor(sessionKey: string, modelKey: string): string | undefined {
   if (!sessionKey) return undefined;
   const entry = reasoningMemory.get(sessionKey);
   if (!entry) return undefined;
