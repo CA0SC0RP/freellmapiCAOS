@@ -42,7 +42,7 @@ import { claudeFamilyDiscoveryEntries, resolveListedClaudeAlias } from '../servi
 import { compressRequest, formatCompressionHeader } from '../services/compression/pipeline.js';
 import { applyDecisionRouting, routingStrategyHeader } from '../services/routing-decision.js';
 import { startStreamKeepalive, streamKeepaliveMs } from '../lib/stream-keepalive.js';
-import { StreamOutputBudget } from '../lib/stream-output-budget.js';
+import { StreamOutputBudget, MAX_STREAM_OUTPUT_BYTES, MAX_STREAM_TOOL_CALLS } from '../lib/stream-output-budget.js';
 
 export const proxyRouter = Router();
 
@@ -197,8 +197,6 @@ const PLATFORMS_REQUIRING_REASONING_ECHO = new Set(['opencode']);
 
 // One upstream chat stream must not accumulate unbounded text, reasoning, or
 // tool-call arguments when a provider ignores its requested output limit.
-const MAX_STREAM_OUTPUT_BYTES = 16 * 1024 * 1024;
-const MAX_STREAM_TOOL_CALLS = 128;
 const MAX_STREAM_PREAMBLE_CHUNKS = 128;
 const MAX_STREAM_PREAMBLE_BYTES = 2 * 1024 * 1024;
 
