@@ -8,6 +8,8 @@ import {
   storeCachedStreamResponse,
   STREAM_CACHE_MAX_BYTES,
   JSON_CACHE_MAX_BYTES,
+  cacheMaxBytes,
+  getCacheMemoryBytes,
   getCacheStats,
   clearCache,
   loadCacheFromDb,
@@ -27,6 +29,7 @@ const CACHE_ENV = [
   'RESPONSE_CACHE_TTL_SECONDS',
   'RESPONSE_CACHE_MAX_TEMPERATURE',
   'RESPONSE_CACHE_MAX_ENTRIES',
+  'RESPONSE_CACHE_MAX_BYTES',
 ] as const;
 
 function msg(role: ChatMessage['role'], content: string): ChatMessage {
@@ -98,6 +101,24 @@ describe('response cache', () => {
     });
     expect(getCacheStats().entries).toBe(before);
     expect(getCachedResponse('oversized-json-entry')).toBeNull();
+  });
+
+  it('enforces one byte budget across JSON and SSE cache entries', () => {
+    process.env.RESPONSE_CACHE_MAX_BYTES = '1048576';
+    expect(cacheMaxBytes()).toBe(1024 * 1024);
+    store('budget-json', 'j'.repeat(600 * 1024));
+    expect(getCachedResponse('budget-json')).not.toBeNull();
+    storeCachedStreamResponse('budget-stream', {
+      frames: ['s'.repeat(600 * 1024)],
+      platform: 'test',
+      modelId: 'stream-model',
+      keyId: null,
+      promptTokens: 1,
+      completionTokens: 1,
+    });
+    expect(getCacheMemoryBytes()).toBeLessThanOrEqual(1024 * 1024);
+    expect(getCachedResponse('budget-json')).toBeNull();
+    expect(getCachedStreamResponse('budget-stream')).not.toBeNull();
   });
 
   it('is stable regardless of object key order', () => {
