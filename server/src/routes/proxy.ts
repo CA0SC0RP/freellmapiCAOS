@@ -183,7 +183,7 @@ const STICKY_TTL_MS = 30 * 60 * 1000; // 30 min session TTL
 // is only ever replayed to that same platform+model, so a session that fails
 // over (or auto-routes elsewhere on the next turn) never carries one model's
 // thinking into another provider's payload.
-const reasoningMemory = new Map<string, { reasoning: string; modelKey: string; lastUsed: number; lastAccessed: number; sizeBytes: number }>();
+const reasoningMemory = new Map<string, { reasoning: string; modelKey: string; lastUsed: number; sizeBytes: number }>();
 const REASONING_TTL_MS = 30 * 60 * 1000; // 30 min, matching sticky sessions
 const REASONING_MAX_ENTRY_BYTES = 2 * 1024 * 1024;
 const REASONING_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
@@ -219,8 +219,7 @@ export function rememberReasoning(sessionKey: string | undefined, modelKey: stri
 
   // Refresh existing sessions to MRU and keep an exact running byte total.
   removeRememberedReasoning(sessionKey);
-  const now = Date.now();
-  reasoningMemory.set(sessionKey, { reasoning, modelKey, lastUsed: now, lastAccessed: now, sizeBytes });
+  reasoningMemory.set(sessionKey, { reasoning, modelKey, lastUsed: Date.now(), sizeBytes });
   reasoningMemoryBytes += sizeBytes;
 
   if (reasoningMemory.size > 500 || reasoningMemoryBytes > REASONING_MAX_TOTAL_BYTES) {
@@ -257,7 +256,6 @@ export function rememberedReasoningFor(sessionKey: string, modelKey: string): st
     return undefined;
   }
   if (entry.modelKey !== modelKey) return undefined;
-  entry.lastAccessed = Date.now();
   reasoningMemory.delete(sessionKey);
   reasoningMemory.set(sessionKey, entry);
   return entry.reasoning;
