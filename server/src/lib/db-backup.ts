@@ -23,29 +23,41 @@ export function maxDbBackupBytes(): number {
 }
 
 async function readResponseLimited(res: Response, maxBytes: number): Promise<Buffer> {
-  const declared = Number(res.headers.get('content-length'));
+  const declaredHeader = res.headers.get('content-length');
+  const declared = declaredHeader == null || declaredHeader.trim() === '' ? NaN : Number(declaredHeader);
   if (Number.isFinite(declared) && declared > maxBytes) {
+    await res.body?.cancel().catch(() => undefined);
     throw new Error(`backup payload exceeds FREEAPI_DB_BACKUP_MAX_BYTES (${maxBytes} bytes)`);
   }
   if (!res.body) return Buffer.alloc(0);
+
   const reader = res.body.getReader();
-  const chunks: Buffer[] = [];
+  let bytes = new Uint8Array(Math.min(maxBytes, 16 * 1024));
   let total = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel('backup payload size limit exceeded').catch(() => undefined);
+      const nextTotal = total + value.byteLength;
+      if (nextTotal > maxBytes) {
         throw new Error(`backup payload exceeds FREEAPI_DB_BACKUP_MAX_BYTES (${maxBytes} bytes)`);
       }
-      chunks.push(Buffer.from(value));
+      if (nextTotal > bytes.byteLength) {
+        const capacity = Math.min(maxBytes, Math.max(nextTotal, Math.max(16 * 1024, bytes.byteLength * 2)));
+        const grown = new Uint8Array(capacity);
+        grown.set(bytes.subarray(0, total));
+        bytes = grown;
+      }
+      bytes.set(value, total);
+      total = nextTotal;
     }
+  } catch (error) {
+    await reader.cancel('backup payload read failed').catch(() => undefined);
+    throw error;
   } finally {
     reader.releaseLock();
   }
-  return Buffer.concat(chunks, total);
+  return Buffer.from(bytes.subarray(0, total));
 }
 const PLACEHOLDER_KEY = 'replace-with-64-char-hex';
 
