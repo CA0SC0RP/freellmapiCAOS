@@ -6,7 +6,7 @@ import type { Express } from 'express';
 import { createApp } from '../../app.js';
 import { initDb, getDb } from '../../db/index.js';
 import { mintDashboardToken, isGatedApiPath } from '../helpers/auth.js';
-import { createBackup, restoreBackup } from '../../services/backups.js';
+import { createBackup, maxSqlBackupBytes, restoreBackup } from '../../services/backups.js';
 
 let dashToken = '';
 let dataDir = '';
@@ -253,6 +253,41 @@ describe('Backups API', () => {
     });
     expect(ok.status).toBe(200);
     expect(fs.existsSync(path.join(dataDir, 'nightly'))).toBe(true);
+  });
+
+
+  it('streams SQL dump rows in bounded batches and enforces the export size ceiling', () => {
+    const db = getDb();
+    const original = process.env.FREEAPI_SQL_BACKUP_MAX_BYTES;
+    try {
+      delete process.env.FREEAPI_SQL_BACKUP_MAX_BYTES;
+      expect(maxSqlBackupBytes()).toBe(256 * 1024 * 1024);
+      process.env.FREEAPI_SQL_BACKUP_MAX_BYTES = '1048576';
+      db.exec('CREATE TABLE backup_memory_limit_test (payload TEXT NOT NULL)');
+      db.prepare('INSERT INTO backup_memory_limit_test (payload) VALUES (?)').run('x'.repeat(1024 * 1024));
+      expect(() => createBackup(db, { tables: ['backup_memory_limit_test'] }))
+        .toThrow(/SQL backup exceeds FREEAPI_SQL_BACKUP_MAX_BYTES/);
+      expect((db.prepare('SELECT COUNT(*) AS n FROM backups').get() as { n: number }).n).toBeGreaterThan(0);
+    } finally {
+      if (original === undefined) delete process.env.FREEAPI_SQL_BACKUP_MAX_BYTES;
+      else process.env.FREEAPI_SQL_BACKUP_MAX_BYTES = original;
+      db.exec('DROP TABLE IF EXISTS backup_memory_limit_test');
+    }
+  });
+
+  it('refuses an oversized SQL dump before loading it into memory for restore', () => {
+    const db = getDb();
+    const backup = createBackup(db, { tables: ['models'] });
+    const file = dumpPath(backup.id);
+    fs.appendFileSync(file, ' '.repeat(1024 * 1024 + 1), 'utf8');
+    const original = process.env.FREEAPI_SQL_BACKUP_MAX_BYTES;
+    process.env.FREEAPI_SQL_BACKUP_MAX_BYTES = '1048576';
+    try {
+      expect(() => restoreBackup(db, backup.id)).toThrow(/SQL backup exceeds FREEAPI_SQL_BACKUP_MAX_BYTES/);
+    } finally {
+      if (original === undefined) delete process.env.FREEAPI_SQL_BACKUP_MAX_BYTES;
+      else process.env.FREEAPI_SQL_BACKUP_MAX_BYTES = original;
+    }
   });
 
   it('takes only an integer id on the download route', async () => {
