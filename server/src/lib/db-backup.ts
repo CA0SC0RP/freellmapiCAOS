@@ -17,7 +17,7 @@ export function maxDbBackupBytes(): number {
   const raw = process.env.FREEAPI_DB_BACKUP_MAX_BYTES;
   if (raw === undefined || raw.trim() === '') return DEFAULT_MAX_BACKUP_BYTES;
   const value = Number(raw);
-  return Number.isSafeInteger(value) && value >= 1024 * 1024 && value <= 2 * 1024 * 1024 * 1024
+  return Number.isSafeInteger(value) && value >= 1024 * 1024 && value <= 512 * 1024 * 1024
     ? value
     : DEFAULT_MAX_BACKUP_BYTES;
 }
