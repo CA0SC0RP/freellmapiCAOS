@@ -310,7 +310,7 @@ describe('Hugging Face backup target', () => {
 
 
 describe('database backup memory ceiling', () => {
-  afterEach(() => restoreEnv());
+  afterEach(() => { vi.unstubAllGlobals(); restoreEnv(); });
 
   it('uses a safe default and rejects invalid or excessive configured limits', () => {
     delete process.env.FREEAPI_DB_BACKUP_MAX_BYTES;
