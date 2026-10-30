@@ -103,6 +103,18 @@ describe('response cache', () => {
     expect(getCachedResponse('oversized-json-entry')).toBeNull();
   });
 
+  it('refuses to retain an SSE cache entry with too many tiny frames', () => {
+    storeCachedStreamResponse('too-many-frames', {
+      frames: Array.from({ length: 4097 }, () => 'x'),
+      platform: 'test',
+      modelId: 'stream-model',
+      keyId: null,
+      promptTokens: 1,
+      completionTokens: 1,
+    });
+    expect(getCachedStreamResponse('too-many-frames')).toBeNull();
+  });
+
   it('enforces one byte budget across JSON and SSE cache entries', () => {
     process.env.RESPONSE_CACHE_MAX_BYTES = '1048576';
     expect(cacheMaxBytes()).toBe(1024 * 1024);
