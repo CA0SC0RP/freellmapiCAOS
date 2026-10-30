@@ -264,7 +264,7 @@ function sqliteCreateTable(db: Db, table: string): string | null {
 }
 
 const DEFAULT_SQL_BACKUP_MAX_BYTES = 256 * 1024 * 1024;
-const SQL_BACKUP_BATCH_ROWS = 250;
+const SQL_BACKUP_BATCH_ROWS = 50;
 
 /** Maximum SQL dump size; bounds both export output and restore input. */
 export function maxSqlBackupBytes(): number {
