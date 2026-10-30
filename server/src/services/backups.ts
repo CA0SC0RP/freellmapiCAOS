@@ -350,7 +350,9 @@ export function createBackup(
   const tempPath = `${filepath}.tmp-${crypto.randomBytes(6).toString('hex')}`;
   let filesize: number;
   try {
-    filesize = writeSqliteDump(db, tables, createdAt, tempPath);
+    // Hold one SQLite read snapshot across all batches so concurrent writes cannot
+    // shift OFFSET pagination and produce a dump with missing or duplicated rows.
+    filesize = db.transaction(() => writeSqliteDump(db, tables, createdAt, tempPath))();
     fs.renameSync(tempPath, filepath);
     restrictToOwner(filepath);
   } catch (err) {
