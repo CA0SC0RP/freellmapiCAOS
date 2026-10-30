@@ -633,54 +633,80 @@ export function loadCacheFromDb(now = Date.now()): void {
     // millions of persisted rows cannot materialize the whole table at startup.
     db.prepare('DELETE FROM response_cache WHERE length(CAST(body_json AS BLOB)) > ?').run(JSON_CACHE_MAX_BYTES);
     const cap = cacheMaxEntries();
-    const rows = db.prepare(
-      `SELECT cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms
-         FROM (
-           SELECT cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms,
-                  SUM(length(CAST(body_json AS BLOB)) + 256) OVER (
-                    ORDER BY created_at_ms DESC, cache_key DESC
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                  ) AS cumulative_bytes
-             FROM response_cache
-            WHERE length(CAST(body_json AS BLOB)) <= ?
-         )
-        WHERE cumulative_bytes <= ?
-        ORDER BY created_at_ms DESC, cache_key DESC
-        LIMIT ?`,
-    ).all(JSON_CACHE_MAX_BYTES, cacheMaxBytes(), cap) as Array<{
-      cache_key: string;
-      body_json: string;
-      platform: string;
-      model_id: string;
-      key_id: number | null;
-      prompt_tokens: number;
-      completion_tokens: number;
-      hit_count: number;
-      created_at_ms: number;
-      last_hit_at_ms: number | null;
-    }>;
-    // SQL returned newest first; reverse to rebuild the LRU oldest → newest.
-    for (const row of rows.reverse()) {
-      if (now - row.created_at_ms > cacheTtlMs()) continue; // aged between purge and read
-      try {
-        removeJsonEntry(row.cache_key);
+    const cap = cacheMaxEntries();
+    const byteCap = cacheMaxBytes();
+    const batchSize = 8;
+    const hydrated: Array<{ key: string; entry: CacheEntry }> = [];
+    let offset = 0;
+    let loadedBytes = 0;
+    let stop = false;
+
+    // Fetch newest rows in small batches. This bounds both SQLite result
+    // materialization and JavaScript parsing while respecting a cumulative
+    // byte budget; a single SELECT over thousands of 2 MiB rows would defeat
+    // the in-memory cap before LRU eviction could run.
+    while (!stop && hydrated.length < cap && loadedBytes < byteCap) {
+      const rows = db.prepare(
+        `SELECT cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms
+           FROM response_cache
+          WHERE length(CAST(body_json AS BLOB)) <= ?
+          ORDER BY created_at_ms DESC, cache_key DESC
+          LIMIT ? OFFSET ?`,
+      ).all(JSON_CACHE_MAX_BYTES, batchSize, offset) as Array<{
+        cache_key: string;
+        body_json: string;
+        platform: string;
+        model_id: string;
+        key_id: number | null;
+        prompt_tokens: number;
+        completion_tokens: number;
+        hit_count: number;
+        created_at_ms: number;
+        last_hit_at_ms: number | null;
+      }>;
+      if (rows.length === 0) break;
+      offset += rows.length;
+
+      for (const row of rows) {
+        if (now - row.created_at_ms > cacheTtlMs()) continue;
         const sizeBytes = Buffer.byteLength(row.body_json, 'utf8') + 256;
-        store.set(row.cache_key, {
-          body: JSON.parse(row.body_json),
-          platform: row.platform,
-          modelId: row.model_id,
-          keyId: row.key_id,
-          promptTokens: row.prompt_tokens,
-          completionTokens: row.completion_tokens,
-          hitCount: row.hit_count,
-          createdAtMs: row.created_at_ms,
-          lastHitAtMs: row.last_hit_at_ms,
-          sizeBytes,
-        });
-        retainedCacheBytes += sizeBytes;
-      } catch {
-        // corrupt body — skip; it will be overwritten on the next store
+        if (loadedBytes + sizeBytes > byteCap) {
+          stop = true;
+          break;
+        }
+        try {
+          hydrated.push({
+            key: row.cache_key,
+            entry: {
+              body: JSON.parse(row.body_json),
+              platform: row.platform,
+              modelId: row.model_id,
+              keyId: row.key_id,
+              promptTokens: row.prompt_tokens,
+              completionTokens: row.completion_tokens,
+              hitCount: row.hit_count,
+              createdAtMs: row.created_at_ms,
+              lastHitAtMs: row.last_hit_at_ms,
+              sizeBytes,
+            },
+          });
+          loadedBytes += sizeBytes;
+        } catch {
+          // corrupt body — skip; it will be overwritten on the next store
+        }
+        if (hydrated.length >= cap || loadedBytes >= byteCap) {
+          stop = true;
+          break;
+        }
       }
+      if (rows.length < batchSize) break;
+    }
+
+    // Results were read newest-first; insert oldest-first to rebuild LRU order.
+    for (const { key, entry } of hydrated.reverse()) {
+      removeJsonEntry(key);
+      store.set(key, entry);
+      retainedCacheBytes += entry.sizeBytes;
     }
     enforceCombinedCap();
   } catch {
