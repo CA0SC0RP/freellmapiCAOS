@@ -704,6 +704,28 @@ describe('response cache', () => {
       expect(getCachedResponse(keys[2]!, base + 10)).not.toBeNull();
     });
 
+    it('bounds total bytes selected from SQLite during cache hydration', () => {
+      setSetting(CACHE_ENABLED_SETTING, 'true');
+      process.env.RESPONSE_CACHE_MAX_BYTES = '1048576';
+      const db = getDb();
+      const body = JSON.stringify(sampleBody('x'.repeat(700 * 1024)));
+      const now = Date.now();
+      const insert = db.prepare(`
+        INSERT INTO response_cache
+          (cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms, expires_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      insert.run('legacy-large-old', body, 'test', 'large', null, 1, 1, 0, now, null, now + 60000);
+      insert.run('legacy-large-new', body, 'test', 'large', null, 1, 1, 0, now + 1, null, now + 60000);
+
+      __resetMemoryForTests();
+      loadCacheFromDb(now + 2);
+      expect(getCacheMemoryBytes()).toBeLessThanOrEqual(1024 * 1024);
+      expect(getCacheStats().entries).toBe(1);
+      expect(getCachedResponse('legacy-large-old', now + 2)).toBeNull();
+      expect(getCachedResponse('legacy-large-new', now + 2)).not.toBeNull();
+    });
+
     it('drops the row when the LRU evicts the entry', () => {
       process.env.RESPONSE_CACHE_MAX_ENTRIES = '1';
       const first = computeCacheKey({ model: 'auto', messages: [msg('user', 'evicted')] });
