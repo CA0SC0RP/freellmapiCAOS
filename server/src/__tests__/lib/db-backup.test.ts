@@ -317,7 +317,7 @@ describe('database backup memory ceiling', () => {
     expect(maxDbBackupBytes()).toBe(512 * 1024 * 1024);
     process.env.FREEAPI_DB_BACKUP_MAX_BYTES = '1048576';
     expect(maxDbBackupBytes()).toBe(1024 * 1024);
-    for (const value of ['0', '-1', '1.5', 'invalid', '2147483649']) {
+    for (const value of ['0', '-1', '1.5', 'invalid', '536870913']) {
       process.env.FREEAPI_DB_BACKUP_MAX_BYTES = value;
       expect(maxDbBackupBytes()).toBe(512 * 1024 * 1024);
     }
