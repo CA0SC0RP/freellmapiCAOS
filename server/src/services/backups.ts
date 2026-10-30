@@ -294,12 +294,12 @@ function writeSqliteDump(db: Db, tables: string[], createdAt: string, filepath: 
   const fd = fs.openSync(filepath, 'wx', 0o600);
   const state = { bytes: 0, maxBytes: maxSqlBackupBytes() };
   try {
-    writeDumpChunk(fd, renderHeader(db, tables, createdAt) + '\\n', state);
+    writeDumpChunk(fd, renderHeader(db, tables, createdAt) + '\n', state);
     for (const table of tables) {
       const create = sqliteCreateTable(db, table);
-      if (create) writeDumpChunk(fd, create + '\\n', state);
+      if (create) writeDumpChunk(fd, create + '\n', state);
       const columns = (db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map((c) => c.name);
-      writeDumpChunk(fd, `DELETE FROM "${table}";\\n`, state);
+      writeDumpChunk(fd, `DELETE FROM "${table}";\n`, state);
       if (columns.length === 0) continue;
       const columnList = columns.map((c) => `"${c}"`).join(', ');
       let offset = 0;
@@ -308,7 +308,7 @@ function writeSqliteDump(db: Db, tables: string[], createdAt: string, filepath: 
           .all(SQL_BACKUP_BATCH_ROWS, offset) as Record<string, unknown>[];
         if (rows.length === 0) break;
         const valueRows = rows.map((row) => `(${columns.map((c) => sqliteEscape(row[c])).join(', ')})`);
-        writeDumpChunk(fd, `INSERT INTO "${table}" (${columnList}) VALUES\\n  ${valueRows.join(',\\n  ')};\\n`, state);
+        writeDumpChunk(fd, `INSERT INTO "${table}" (${columnList}) VALUES\n  ${valueRows.join(',\n  ')};\n`, state);
         offset += rows.length;
         if (rows.length < SQL_BACKUP_BATCH_ROWS) break;
       }
