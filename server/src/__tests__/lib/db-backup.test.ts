@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { backupDbNow, parseHuggingFaceTarget, restoreDbBackupIfNeeded } from '../../lib/db-backup.js';
+import { backupDbNow, maxDbBackupBytes, parseHuggingFaceTarget, restoreDbBackupIfNeeded } from '../../lib/db-backup.js';
 import { aclEntries } from '../helpers/acl.js';
 
 const ORIGINAL_BACKUP_PATH = process.env.FREEAPI_DB_BACKUP_PATH;
@@ -12,6 +12,7 @@ const ORIGINAL_BACKUP_URL = process.env.FREEAPI_DB_BACKUP_URL;
 const ORIGINAL_BACKUP_KEY = process.env.FREEAPI_DB_BACKUP_KEY;
 const ORIGINAL_BACKUP_TOKEN = process.env.FREEAPI_DB_BACKUP_TOKEN;
 const ORIGINAL_ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+const ORIGINAL_MAX_BACKUP_BYTES = process.env.FREEAPI_DB_BACKUP_MAX_BYTES;
 
 function restoreEnv() {
   if (ORIGINAL_BACKUP_PATH === undefined) delete process.env.FREEAPI_DB_BACKUP_PATH;
@@ -26,6 +27,8 @@ function restoreEnv() {
   else process.env.FREEAPI_DB_BACKUP_TOKEN = ORIGINAL_BACKUP_TOKEN;
   if (ORIGINAL_ENCRYPTION_KEY === undefined) delete process.env.ENCRYPTION_KEY;
   else process.env.ENCRYPTION_KEY = ORIGINAL_ENCRYPTION_KEY;
+  if (ORIGINAL_MAX_BACKUP_BYTES === undefined) delete process.env.FREEAPI_DB_BACKUP_MAX_BYTES;
+  else process.env.FREEAPI_DB_BACKUP_MAX_BYTES = ORIGINAL_MAX_BACKUP_BYTES;
 }
 
 describe('encrypted SQLite backup', () => {
@@ -302,5 +305,50 @@ describe('Hugging Face backup target', () => {
     expect(init.method).toBe('PUT');
     expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/octet-stream');
     expect(Buffer.isBuffer(init.body)).toBe(true);
+  });
+});
+
+
+describe('database backup memory ceiling', () => {
+  afterEach(() => restoreEnv());
+
+  it('uses a safe default and rejects invalid or excessive configured limits', () => {
+    delete process.env.FREEAPI_DB_BACKUP_MAX_BYTES;
+    expect(maxDbBackupBytes()).toBe(512 * 1024 * 1024);
+    process.env.FREEAPI_DB_BACKUP_MAX_BYTES = '1048576';
+    expect(maxDbBackupBytes()).toBe(1024 * 1024);
+    for (const value of ['0', '-1', '1.5', 'invalid', '2147483649']) {
+      process.env.FREEAPI_DB_BACKUP_MAX_BYTES = value;
+      expect(maxDbBackupBytes()).toBe(512 * 1024 * 1024);
+    }
+  });
+
+  it('refuses to read a local database above the configured cap', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-backup-cap-'));
+    const dbPath = path.join(dir, 'large.db');
+    const db = new Database(dbPath);
+    db.exec('CREATE TABLE items (name TEXT NOT NULL)');
+    db.close();
+    process.env.FREEAPI_DB_BACKUP_PATH = path.join(dir, 'backup.bin');
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.FREEAPI_DB_BACKUP_MAX_BYTES = '1048576';
+    // Sparse extension keeps the test cheap while exercising the pre-read stat guard.
+    fs.truncateSync(dbPath, 1024 * 1024 + 1);
+    await expect(backupDbNow({ pragma: () => undefined } as never, dbPath))
+      .rejects.toThrow(/exceeds FREEAPI_DB_BACKUP_MAX_BYTES/);
+  });
+
+  it('rejects an oversized remote backup from its content-length before reading it', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-backup-remote-cap-'));
+    const dbPath = path.join(dir, 'restore.db');
+    process.env.FREEAPI_DB_BACKUP_TARGET = 'https://storage.example.com/backup.bin';
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.FREEAPI_DB_BACKUP_MAX_BYTES = '1048576';
+    const fetchMock = vi.fn(async () => new Response('too large', {
+      status: 200,
+      headers: { 'content-length': String(1024 * 1024 + 1) },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(restoreDbBackupIfNeeded(dbPath)).rejects.toThrow(/exceeds FREEAPI_DB_BACKUP_MAX_BYTES/);
   });
 });

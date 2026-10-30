@@ -10,6 +10,56 @@ import { restrictToOwner } from './file-permissions.js';
 const MAGIC = Buffer.from('FAPIBK1\0');
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 30 * 1000;
+const DEFAULT_MAX_BACKUP_BYTES = 512 * 1024 * 1024;
+
+/** Hard ceiling for backup payloads before they are buffered or transformed. */
+export function maxDbBackupBytes(): number {
+  const raw = process.env.FREEAPI_DB_BACKUP_MAX_BYTES;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_MAX_BACKUP_BYTES;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 1024 * 1024 && value <= 2 * 1024 * 1024 * 1024
+    ? value
+    : DEFAULT_MAX_BACKUP_BYTES;
+}
+
+async function readResponseLimited(res: Response, maxBytes: number): Promise<Buffer> {
+  const declaredHeader = res.headers.get('content-length');
+  const declared = declaredHeader == null || declaredHeader.trim() === '' ? NaN : Number(declaredHeader);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new Error(`backup payload exceeds FREEAPI_DB_BACKUP_MAX_BYTES (${maxBytes} bytes)`);
+  }
+  if (!res.body) return Buffer.alloc(0);
+
+  const reader = res.body.getReader();
+  let bytes = new Uint8Array(Math.min(maxBytes, 16 * 1024));
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const nextTotal = total + value.byteLength;
+      if (nextTotal > maxBytes) {
+        throw new Error(`backup payload exceeds FREEAPI_DB_BACKUP_MAX_BYTES (${maxBytes} bytes)`);
+      }
+      if (nextTotal > bytes.byteLength) {
+        const capacity = Math.min(maxBytes, Math.max(nextTotal, Math.max(16 * 1024, bytes.byteLength * 2)));
+        const grown = new Uint8Array(capacity);
+        grown.set(bytes.subarray(0, total));
+        bytes = grown;
+      }
+      bytes.set(value, total);
+      total = nextTotal;
+    }
+  } catch (error) {
+    await reader.cancel('backup payload read failed').catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  // Share the bounded backing store instead of copying the whole payload a second time.
+  return Buffer.from(bytes.buffer, bytes.byteOffset, total);
+}
 const PLACEHOLDER_KEY = 'replace-with-64-char-hex';
 
 export interface DbBackupResult {
@@ -168,11 +218,15 @@ async function readTarget(target: string): Promise<Buffer | null> {
     const res = await fetch(target, { method: 'GET', headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (res.status === 404 || res.status === 204) return null;
     if (!res.ok) throw new Error(`backup restore failed: HTTP ${res.status}`);
-    const raw = Buffer.from(await res.arrayBuffer());
+    const raw = await readResponseLimited(res, maxDbBackupBytes());
     return parseHuggingFaceTarget(target) ? decodeHuggingFacePayload(raw) : raw;
   }
 
   if (!fs.existsSync(target)) return null;
+  const size = fs.statSync(target).size;
+  if (size > maxDbBackupBytes()) {
+    throw new Error(`backup payload exceeds FREEAPI_DB_BACKUP_MAX_BYTES (${maxDbBackupBytes()} bytes)`);
+  }
   return fs.readFileSync(target);
 }
 
@@ -253,6 +307,10 @@ export async function backupDbNow(db: Db, dbPath = getDefaultDbPath()): Promise<
     // Best effort: reading the main DB still works for rollback-journal or quiet WAL DBs.
   }
 
+  const dbSize = fs.statSync(dbPath).size;
+  if (dbSize > maxDbBackupBytes()) {
+    throw new Error(`database exceeds FREEAPI_DB_BACKUP_MAX_BYTES (${maxDbBackupBytes()} bytes); backup skipped to protect memory`);
+  }
   const plain = fs.readFileSync(dbPath);
   const payload = encryptBackup(gzipSync(plain));
   await writeTarget(target, payload);
@@ -262,9 +320,14 @@ export async function backupDbNow(db: Db, dbPath = getDefaultDbPath()): Promise<
 
 export function startDbBackupPump(db: Db, scheduler: Scheduler, dbPath = getDefaultDbPath()): (() => void) | null {
   if (!backupTarget()) return null;
+  let running = false;
   const run = () => {
+    if (running) return;
+    running = true;
     void backupDbNow(db, dbPath).catch(err => {
       console.warn(`[db-backup] ${err instanceof Error ? err.message : err}`);
+    }).finally(() => {
+      running = false;
     });
   };
   run();
