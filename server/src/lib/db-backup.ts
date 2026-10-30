@@ -57,7 +57,8 @@ async function readResponseLimited(res: Response, maxBytes: number): Promise<Buf
   } finally {
     reader.releaseLock();
   }
-  return Buffer.from(bytes.subarray(0, total));
+  // Share the bounded backing store instead of copying the whole payload a second time.
+  return Buffer.from(bytes.buffer, bytes.byteOffset, total);
 }
 const PLACEHOLDER_KEY = 'replace-with-64-char-hex';
 
