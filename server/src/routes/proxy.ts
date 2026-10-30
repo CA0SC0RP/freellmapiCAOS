@@ -198,6 +198,7 @@ const PLATFORMS_REQUIRING_REASONING_ECHO = new Set(['opencode']);
 // tool-call arguments when a provider ignores its requested output limit.
 const MAX_STREAM_OUTPUT_BYTES = 16 * 1024 * 1024;
 const MAX_STREAM_TOOL_CALLS = 128;
+const MAX_STREAM_PREAMBLE_CHUNKS = 128;
 
 
 function rememberReasoning(sessionKey: string | undefined, modelKey: string, reasoning: string) {
@@ -2854,7 +2855,14 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
                 // `usage: undefined` (dropped by JSON.stringify): it was held
                 // above and is re-emitted once, after our finish chunk.
                 const cleaned = { ...anyChunk, usage: undefined, choices: [{ ...choice, delta: { ...choice.delta, tool_calls: undefined }, finish_reason: null }] };
-                if (headerSent) writeChunk(cleaned); else preamble.push(cleaned);
+                if (headerSent) {
+                  writeChunk(cleaned);
+                } else {
+                  if (preamble.length >= MAX_STREAM_PREAMBLE_CHUNKS) {
+                    throw new Error(`provider stream exceeded the ${MAX_STREAM_PREAMBLE_CHUNKS}-chunk preamble safety limit`);
+                  }
+                  preamble.push(cleaned);
+                }
               }
               continue;
             }
