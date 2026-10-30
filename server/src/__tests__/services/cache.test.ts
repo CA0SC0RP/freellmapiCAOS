@@ -7,6 +7,7 @@ import {
   getCachedStreamResponse,
   storeCachedStreamResponse,
   STREAM_CACHE_MAX_BYTES,
+  JSON_CACHE_MAX_BYTES,
   getCacheStats,
   clearCache,
   loadCacheFromDb,
@@ -70,7 +71,21 @@ describe('response cache', () => {
   });
 
   describe('computeCacheKey', () => {
-    it('is stable regardless of object key order', () => {
+    it('does not retain a JSON response larger than the per-entry memory ceiling', () => {
+    const before = getCacheStats().entries;
+    storeCachedResponse('oversized-json-entry', {
+      body: sampleBody('x'.repeat(JSON_CACHE_MAX_BYTES + 1)),
+      platform: 'test',
+      modelId: 'large-model',
+      keyId: null,
+      promptTokens: 1,
+      completionTokens: 1,
+    });
+    expect(getCacheStats().entries).toBe(before);
+    expect(getCachedResponse('oversized-json-entry')).toBeNull();
+  });
+
+  it('is stable regardless of object key order', () => {
       const messages = [msg('user', 'hello')];
       const a = computeCacheKey({ model: 'auto', messages, temperature: 0.2, top_p: 1 });
       const b = computeCacheKey({ messages, top_p: 1, temperature: 0.2, model: 'auto' });
