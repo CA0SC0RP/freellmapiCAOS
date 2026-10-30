@@ -633,7 +633,6 @@ export function loadCacheFromDb(now = Date.now()): void {
     // millions of persisted rows cannot materialize the whole table at startup.
     db.prepare('DELETE FROM response_cache WHERE length(CAST(body_json AS BLOB)) > ?').run(JSON_CACHE_MAX_BYTES);
     const cap = cacheMaxEntries();
-    const cap = cacheMaxEntries();
     const byteCap = cacheMaxBytes();
     const batchSize = 8;
     const hydrated: Array<{ key: string; entry: CacheEntry }> = [];
