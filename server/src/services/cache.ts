@@ -109,6 +109,9 @@ export function cacheMaxEntries(): number {
   return Math.floor(envNum('RESPONSE_CACHE_MAX_ENTRIES', 5000));
 }
 
+/** Maximum serialized JSON response retained by one cache entry. */
+export const JSON_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+
 // A request is cacheable only when its temperature is omitted (caller accepts
 // the provider default and is fine with a stable answer) or at/below the cap.
 export function isCacheableTemperature(temperature?: number | null): boolean {
@@ -498,6 +501,10 @@ export function storeCachedResponse(cacheKey: string, input: StoreInput, now = D
   } catch {
     return;
   }
+  // Entry count alone is not a memory bound: one unusually large completion
+  // could otherwise pin hundreds of megabytes until TTL/LRU eviction. Keep the
+  // JSON cache aligned with the stream replay ceiling and skip oversized data.
+  if (Buffer.byteLength(bodyJson, 'utf8') > JSON_CACHE_MAX_BYTES) return;
 
   // Delete-then-set so an overwrite also refreshes recency order. Any hits
   // still waiting to be flushed counted the old answer, not this one.
@@ -575,11 +582,18 @@ export function loadCacheFromDb(now = Date.now()): void {
     // Hydration only when the operator actually wants the cache (and its
     // on-disk half). Off by default, so this is inert on an untouched install.
     if (!cachePersistenceEnabled()) return;
+    // Legacy rows may predate the per-entry cap. Delete them in SQLite before
+    // selecting any payload bytes, and bound hydration in SQL so a cache with
+    // millions of persisted rows cannot materialize the whole table at startup.
+    db.prepare('DELETE FROM response_cache WHERE length(CAST(body_json AS BLOB)) > ?').run(JSON_CACHE_MAX_BYTES);
+    const cap = cacheMaxEntries();
     const rows = db.prepare(
       `SELECT cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms
          FROM response_cache
-        ORDER BY created_at_ms ASC`,
-    ).all() as Array<{
+        WHERE length(CAST(body_json AS BLOB)) <= ?
+        ORDER BY created_at_ms DESC
+        LIMIT ?`,
+    ).all(JSON_CACHE_MAX_BYTES, cap) as Array<{
       cache_key: string;
       body_json: string;
       platform: string;
@@ -591,10 +605,8 @@ export function loadCacheFromDb(now = Date.now()): void {
       created_at_ms: number;
       last_hit_at_ms: number | null;
     }>;
-    const cap = cacheMaxEntries();
-    // Newest wins: drop rows past the cap from the FRONT (oldest first).
-    const keep = rows.length > cap ? rows.slice(rows.length - cap) : rows;
-    for (const row of keep) {
+    // SQL returned newest first; reverse to rebuild the LRU oldest → newest.
+    for (const row of rows.reverse()) {
       if (now - row.created_at_ms > cacheTtlMs()) continue; // aged between purge and read
       try {
         store.set(row.cache_key, {

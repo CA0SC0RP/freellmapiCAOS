@@ -7,6 +7,7 @@ import {
   getCachedStreamResponse,
   storeCachedStreamResponse,
   STREAM_CACHE_MAX_BYTES,
+  JSON_CACHE_MAX_BYTES,
   getCacheStats,
   clearCache,
   loadCacheFromDb,
@@ -70,7 +71,36 @@ describe('response cache', () => {
   });
 
   describe('computeCacheKey', () => {
-    it('is stable regardless of object key order', () => {
+    it('purges oversized legacy rows before cache hydration', () => {
+    setSetting(CACHE_ENABLED_SETTING, 'true');
+    const db = getDb();
+    const oversized = JSON.stringify(sampleBody('x'.repeat(JSON_CACHE_MAX_BYTES + 1)));
+    db.prepare(`
+      INSERT OR REPLACE INTO response_cache
+        (cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms, expires_at_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('legacy-oversized-entry', oversized, 'test', 'large-model', null, 1, 1, 0, Date.now(), null, Date.now() + 60000);
+
+    loadCacheFromDb();
+    expect(db.prepare('SELECT cache_key FROM response_cache WHERE cache_key = ?').get('legacy-oversized-entry')).toBeUndefined();
+    expect(getCachedResponse('legacy-oversized-entry')).toBeNull();
+  });
+
+  it('does not retain a JSON response larger than the per-entry memory ceiling', () => {
+    const before = getCacheStats().entries;
+    storeCachedResponse('oversized-json-entry', {
+      body: sampleBody('x'.repeat(JSON_CACHE_MAX_BYTES + 1)),
+      platform: 'test',
+      modelId: 'large-model',
+      keyId: null,
+      promptTokens: 1,
+      completionTokens: 1,
+    });
+    expect(getCacheStats().entries).toBe(before);
+    expect(getCachedResponse('oversized-json-entry')).toBeNull();
+  });
+
+  it('is stable regardless of object key order', () => {
       const messages = [msg('user', 'hello')];
       const a = computeCacheKey({ model: 'auto', messages, temperature: 0.2, top_p: 1 });
       const b = computeCacheKey({ messages, top_p: 1, temperature: 0.2, model: 'auto' });
