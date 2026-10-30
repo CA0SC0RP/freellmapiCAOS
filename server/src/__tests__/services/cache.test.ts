@@ -71,7 +71,22 @@ describe('response cache', () => {
   });
 
   describe('computeCacheKey', () => {
-    it('does not retain a JSON response larger than the per-entry memory ceiling', () => {
+    it('purges oversized legacy rows before cache hydration', () => {
+    setSetting(CACHE_ENABLED_SETTING, 'true');
+    const db = getDb();
+    const oversized = JSON.stringify(sampleBody('x'.repeat(JSON_CACHE_MAX_BYTES + 1)));
+    db.prepare(`
+      INSERT OR REPLACE INTO response_cache
+        (cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms, expires_at_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('legacy-oversized-entry', oversized, 'test', 'large-model', null, 1, 1, 0, Date.now(), null, Date.now() + 60000);
+
+    loadCacheFromDb();
+    expect(db.prepare('SELECT cache_key FROM response_cache WHERE cache_key = ?').get('legacy-oversized-entry')).toBeUndefined();
+    expect(getCachedResponse('legacy-oversized-entry')).toBeNull();
+  });
+
+  it('does not retain a JSON response larger than the per-entry memory ceiling', () => {
     const before = getCacheStats().entries;
     storeCachedResponse('oversized-json-entry', {
       body: sampleBody('x'.repeat(JSON_CACHE_MAX_BYTES + 1)),
