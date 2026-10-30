@@ -26,6 +26,7 @@ import { extractApiToken, getStickyModel, setStickyModel } from './proxy.js';
 import { runFallbackLoop, newFallbackState, fallbackRoutingTokens, recordUpstreamSuccess, type ExhaustionBody, setFallbackHeaders, setExhaustionHeaders, type AttemptRecord, type FallbackState, REASONING_HOLD_MAX_MS } from '../lib/fallback-loop.js';
 import { routedViaValue } from '../lib/header-value.js';
 import { startStreamKeepalive, streamKeepaliveMs } from '../lib/stream-keepalive.js';
+import { StreamOutputBudget, MAX_STREAM_OUTPUT_BYTES, MAX_STREAM_TOOL_CALLS } from '../lib/stream-output-budget.js';
 import { applyTokenBudget, tokenBudgetMessage } from '../lib/guardrails.js';
 import { resolveAnthropicModel, claudeFamilyDiscoveryEntries } from '../services/anthropic-map.js';
 import { isUnifyEnabled, getModelGroups, resolveRequestedIdForDispatch } from '../services/model-groups.js';
@@ -878,6 +879,7 @@ async function streamCompletion(
   let textBlockIndex = -1;
   let nextIndex = 0;
   let outputChars = 0;
+  const streamOutputBudget = new StreamOutputBudget(MAX_STREAM_OUTPUT_BYTES);
   let upstreamFinish: string | null = null;
   const toolAcc = new Map<number, { id?: string; name: string; args: string; thought_signature?: string }>();
 
@@ -995,13 +997,28 @@ async function streamCompletion(
 
       for (const tc of choice.delta?.tool_calls ?? []) {
         const idx = (tc as any).index ?? 0;
-        if (!toolAcc.has(idx)) toolAcc.set(idx, { id: undefined, name: '', args: '' });
+        if (!toolAcc.has(idx)) {
+          if (toolAcc.size >= MAX_STREAM_TOOL_CALLS) {
+            throw new Error(`provider stream exceeded the ${MAX_STREAM_TOOL_CALLS}-tool-call safety limit`);
+          }
+          toolAcc.set(idx, { id: undefined, name: '', args: '' });
+        }
         const acc = toolAcc.get(idx)!;
-        if (tc.id && !acc.id) acc.id = tc.id;
-        if (tc.function?.name) acc.name += tc.function.name;
-        if (tc.function?.arguments) acc.args += tc.function.arguments;
+        if (tc.id && !acc.id) {
+          streamOutputBudget.add(tc.id);
+          acc.id = tc.id;
+        }
+        if (tc.function?.name) {
+          streamOutputBudget.add(tc.function.name);
+          acc.name += tc.function.name;
+        }
+        if (tc.function?.arguments) {
+          streamOutputBudget.add(tc.function.arguments);
+          acc.args += tc.function.arguments;
+        }
         const thoughtSignature = (tc as any).thought_signature ?? (tc as any).thoughtSignature;
         if (typeof thoughtSignature === 'string' && thoughtSignature.length > 0 && !acc.thought_signature) {
+          streamOutputBudget.add(thoughtSignature);
           acc.thought_signature = thoughtSignature;
         }
       }
@@ -1009,7 +1026,10 @@ async function streamCompletion(
       // Reasoning deltas: providers emit reasoning_content (or Ollama-style
       // `reasoning`); the shared <think> extractor emits reasoning_content.
       const reasoningDelta = choice.delta?.reasoning_content ?? choice.delta?.reasoning;
-      if (typeof reasoningDelta === 'string' && reasoningDelta.length > 0) reasoningBuf += reasoningDelta;
+      if (typeof reasoningDelta === 'string' && reasoningDelta.length > 0) {
+        streamOutputBudget.add(reasoningDelta);
+        reasoningBuf += reasoningDelta;
+      }
       // #1642: long reasoning with nothing streamed yet: commit and ping.
       if (reasoningBuf.length > 0 && !textBlockOpen && Date.now() - quietSince >= REASONING_HOLD_MAX_MS) {
         ensureMessageStart();
@@ -1019,6 +1039,7 @@ async function streamCompletion(
 
       const text = typeof choice.delta?.content === 'string' ? choice.delta.content : '';
       if (text.length === 0) continue;
+      streamOutputBudget.add(text);
 
       if (dialectMode === 'passthrough') {
         emitText(text);
@@ -1064,6 +1085,9 @@ async function streamCompletion(
         throw new Error(`unparseable inline tool-call dialect from ${route.displayName}: ${heldText.slice(0, 120)}`);
       }
       if (rescue.detected && rescue.calls) {
+        if (completedCalls.length + rescue.calls.length > MAX_STREAM_TOOL_CALLS) {
+          throw new Error(`provider stream exceeded the ${MAX_STREAM_TOOL_CALLS}-tool-call safety limit`);
+        }
         if (rescue.cleanText.length > 0) emitText(rescue.cleanText);
         for (const c of rescue.calls) {
           const repaired = repairToolArguments(c.arguments, schemas.get(c.name));

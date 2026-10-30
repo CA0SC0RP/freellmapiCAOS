@@ -33,6 +33,7 @@ import {
 import { runFallbackLoop, newFallbackState, fallbackRoutingTokens, recordUpstreamSuccess, setFallbackHeaders, exhaustionErrorPayload, setExhaustionHeaders, type AttemptRecord } from '../lib/fallback-loop.js';
 import { routedViaValue, safeHeaderValue } from '../lib/header-value.js';
 import { startStreamKeepalive, streamKeepaliveMs } from '../lib/stream-keepalive.js';
+import { StreamOutputBudget, MAX_STREAM_OUTPUT_BYTES, MAX_STREAM_TOOL_CALLS } from '../lib/stream-output-budget.js';
 import { applyTokenBudget, tokenBudgetMessage } from '../lib/guardrails.js';
 import { samplingParamSchemaFields, pickSamplingParams, type ResponseFormat } from '../lib/sampling-params.js';
 import { enforceJsonContent } from '../lib/structured-output.js';
@@ -1237,6 +1238,7 @@ export async function handleResponses(req: Request, res: Response): Promise<void
         // tool-call accumulator keyed by the provider's tool_call index
         const toolAcc = new Map<number, { outputIndex: number; itemId: string; callId: string; name: string; args: string }>();
         let totalOutputTokens = 0;
+        const streamOutputBudget = new StreamOutputBudget(MAX_STREAM_OUTPUT_BYTES);
         // #764: thinking tokens are tracked separately so the final Response
         // object can report `output_tokens_details.reasoning_tokens` truthfully
         // instead of a hardcoded 0.
@@ -1361,6 +1363,8 @@ export async function handleResponses(req: Request, res: Response): Promise<void
             // reflects the real head-of-stream, and count thinking tokens as
             // real output consumption.
             const reasoning = streamReasoningText(chunk);
+            if (typeof text === 'string' && text.length > 0) streamOutputBudget.add(text);
+            if (reasoning.length > 0) streamOutputBudget.add(reasoning);
             if (ttfbMs === null && (text.length > 0 || reasoning.length > 0)) {
               ttfbMs = Date.now() - start;
             }
@@ -1397,6 +1401,9 @@ export async function handleResponses(req: Request, res: Response): Promise<void
               const idx = (tc as any).index ?? 0;
               let acc = toolAcc.get(idx);
               if (!acc) {
+                if (toolAcc.size >= MAX_STREAM_TOOL_CALLS) {
+                  throw new Error(`provider stream exceeded the ${MAX_STREAM_TOOL_CALLS}-tool-call safety limit`);
+                }
                 // First time we see this tool call: open a new output item.
                 commit();
                 if (msgItemId !== null && msgText.length > 0) {
@@ -1406,7 +1413,11 @@ export async function handleResponses(req: Request, res: Response): Promise<void
                   sse('response.output_item.done', { output_index: textOutputIndex, item: { id: msgItemId, type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: msgText, annotations: [] }] } });
                   msgItemId = null;
                 }
-                acc = { outputIndex: outputIndex++, itemId: newId('fc'), callId: tc.id || newId('call'), name: tc.function?.name ?? '', args: '' };
+                const initialName = tc.function?.name ?? '';
+                const callId = tc.id || newId('call');
+                if (initialName) streamOutputBudget.add(initialName);
+                if (tc.id) streamOutputBudget.add(tc.id);
+                acc = { outputIndex: outputIndex++, itemId: newId('fc'), callId, name: initialName, args: '' };
                 toolAcc.set(idx, acc);
                 sse('response.output_item.added', {
                   output_index: acc.outputIndex,
@@ -1414,8 +1425,12 @@ export async function handleResponses(req: Request, res: Response): Promise<void
                 });
               }
               const argFrag = tc.function?.arguments ?? '';
-              if (tc.function?.name && !acc.name) acc.name = tc.function.name;
+              if (tc.function?.name && !acc.name) {
+                streamOutputBudget.add(tc.function.name);
+                acc.name = tc.function.name;
+              }
               if (argFrag) {
+                streamOutputBudget.add(argFrag);
                 acc.args += argFrag;
                 sse('response.function_call_arguments.delta', { item_id: acc.itemId, output_index: acc.outputIndex, delta: argFrag });
               }
@@ -1435,6 +1450,9 @@ export async function handleResponses(req: Request, res: Response): Promise<void
               throw new Error(`unparseable inline tool-call dialect from ${route.displayName}: ${heldText.slice(0, 120)}`);
             }
             if (rescue.detected && rescue.calls) {
+              if (toolAcc.size + rescue.calls.length > MAX_STREAM_TOOL_CALLS) {
+                throw new Error(`provider stream exceeded the ${MAX_STREAM_TOOL_CALLS}-tool-call safety limit`);
+              }
               // Rescued calls become function_call items, exactly as if the
               // provider had streamed them structurally.
               console.log(`[Responses] Rescued ${rescue.calls.length} inline tool call(s) from ${route.displayName}`);
