@@ -271,7 +271,7 @@ export function maxSqlBackupBytes(): number {
   const raw = process.env.FREEAPI_SQL_BACKUP_MAX_BYTES;
   if (raw === undefined || raw.trim() === '') return DEFAULT_SQL_BACKUP_MAX_BYTES;
   const value = Number(raw);
-  return Number.isSafeInteger(value) && value >= 1024 * 1024 && value <= 2 * 1024 * 1024 * 1024
+  return Number.isSafeInteger(value) && value >= 1024 * 1024 && value <= 512 * 1024 * 1024
     ? value
     : DEFAULT_SQL_BACKUP_MAX_BYTES;
 }
