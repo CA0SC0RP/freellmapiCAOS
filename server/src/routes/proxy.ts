@@ -194,6 +194,12 @@ const REASONING_TTL_MS = 30 * 60 * 1000; // 30 min, matching sticky sessions
 // touched, so no other provider's bytes change.
 const PLATFORMS_REQUIRING_REASONING_ECHO = new Set(['opencode']);
 
+// One upstream chat stream must not accumulate unbounded text, reasoning, or
+// tool-call arguments when a provider ignores its requested output limit.
+const MAX_STREAM_OUTPUT_BYTES = 16 * 1024 * 1024;
+const MAX_STREAM_TOOL_CALLS = 128;
+
+
 function rememberReasoning(sessionKey: string | undefined, modelKey: string, reasoning: string) {
   if (!sessionKey || !reasoning) return;
   reasoningMemory.set(sessionKey, { reasoning, modelKey, lastUsed: Date.now() });
@@ -2578,6 +2584,13 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     // remembered per-session so a follow-up whose client stripped the field
     // can have it restored (see restore block above).
     let streamReasoning = '';
+    let streamOutputBytes = 0;
+    const accountStreamOutput = (value: string) => {
+      streamOutputBytes += Buffer.byteLength(value, 'utf8');
+      if (streamOutputBytes > MAX_STREAM_OUTPUT_BYTES) {
+        throw new Error(`provider stream exceeded the ${MAX_STREAM_OUTPUT_BYTES}-byte output safety limit`);
+      }
+    };
     // Extra input tokens the injected handoff adds on this turn (0 when not
     // injected). Folded into the streaming success accounting, where token
     // counts are estimated; the non-stream path uses the provider's usage,
@@ -2787,21 +2800,36 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
             // client stripped it can have it restored from session memory.
             // Shared with the #764 ttfb/token accounting below.
             const reasoning = streamReasoningText(anyChunk);
-            if (reasoning.length > 0) streamReasoning += reasoning;
+            if (reasoning.length > 0) {
+              accountStreamOutput(reasoning);
+              streamReasoning += reasoning;
+            }
 
             // Buffer tool_call deltas — emitted complete + repaired at end.
             for (const tc of choice.delta?.tool_calls ?? []) {
               const idx = tc.index ?? 0;
-              if (!toolCallAcc.has(idx)) toolCallAcc.set(idx, { id: undefined, name: '', args: '' });
+              if (!toolCallAcc.has(idx)) {
+                if (toolCallAcc.size >= MAX_STREAM_TOOL_CALLS) {
+                  throw new Error(`provider stream exceeded the ${MAX_STREAM_TOOL_CALLS}-tool-call safety limit`);
+                }
+                toolCallAcc.set(idx, { id: undefined, name: '', args: '' });
+              }
               const acc = toolCallAcc.get(idx)!;
               if (tc.id && !acc.id) acc.id = tc.id;
-              if (tc.function?.name) acc.name += tc.function.name;
-              if (tc.function?.arguments) acc.args += tc.function.arguments;
+              if (tc.function?.name) {
+                accountStreamOutput(tc.function.name);
+                acc.name += tc.function.name;
+              }
+              if (tc.function?.arguments) {
+                accountStreamOutput(tc.function.arguments);
+                acc.args += tc.function.arguments;
+              }
             }
 
             normalizeOutboundContent(anyChunk);
             sanitizeResponse(anyChunk);
             const text = typeof choice.delta?.content === 'string' ? choice.delta.content : '';
+            if (text.length > 0) accountStreamOutput(text);
 
             // #764: ttfb = first token of ANY kind, not just visible content —
             // reasoning models stream thinking long before the first answer
