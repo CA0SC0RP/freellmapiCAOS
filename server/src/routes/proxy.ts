@@ -2924,6 +2924,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
             const rescue = rescueInlineToolCalls(heldText, new Set((tools ?? []).map(t => t.function.name)));
             if (rescue.detected) {
               if (!rescue.calls) throw new Error(`unparseable inline tool-call dialect from ${route.displayName}: ${heldText.slice(0, 120)}`);
+              if (toolCallAcc.size + rescue.calls.length > MAX_STREAM_TOOL_CALLS) {
+                throw new Error(`provider stream exceeded the ${MAX_STREAM_TOOL_CALLS}-tool-call safety limit`);
+              }
               let rescuedIds = 0;
               for (const c of rescue.calls) {
                 completedCalls.push({ id: `call_rescued_${++rescuedIds}`, type: 'function', function: { name: c.name, arguments: repairToolArguments(c.arguments, schemas.get(c.name)) } });
