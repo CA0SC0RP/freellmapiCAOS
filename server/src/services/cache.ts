@@ -112,6 +112,17 @@ export function cacheMaxEntries(): number {
 /** Maximum serialized JSON response retained by one cache entry. */
 export const JSON_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 
+/** Shared memory budget for JSON and SSE entries, including a small per-entry overhead. */
+const DEFAULT_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+export function cacheMaxBytes(): number {
+  const raw = process.env.RESPONSE_CACHE_MAX_BYTES;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_CACHE_MAX_BYTES;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 1024 * 1024 && value <= 512 * 1024 * 1024
+    ? value
+    : DEFAULT_CACHE_MAX_BYTES;
+}
+
 // A request is cacheable only when its temperature is omitted (caller accepts
 // the provider default and is fine with a stable answer) or at/below the cap.
 export function isCacheableTemperature(temperature?: number | null): boolean {
@@ -276,6 +287,7 @@ interface CacheEntry {
   hitCount: number;
   createdAtMs: number;
   lastHitAtMs: number | null;
+  sizeBytes: number;
 }
 
 // Insertion-ordered map used as an LRU: the first key is the least-recently
@@ -299,8 +311,28 @@ interface StreamCacheEntry {
   hitCount: number;
   createdAtMs: number;
   lastHitAtMs: number | null;
+  sizeBytes: number;
 }
 const streamStore = new Map<string, StreamCacheEntry>();
+let retainedCacheBytes = 0;
+
+function removeJsonEntry(key: string): void {
+  const entry = store.get(key);
+  if (!entry) return;
+  store.delete(key);
+  retainedCacheBytes = Math.max(0, retainedCacheBytes - entry.sizeBytes);
+}
+
+function removeStreamEntry(key: string): void {
+  const entry = streamStore.get(key);
+  if (!entry) return;
+  streamStore.delete(key);
+  retainedCacheBytes = Math.max(0, retainedCacheBytes - entry.sizeBytes);
+}
+
+export function getCacheMemoryBytes(): number {
+  return retainedCacheBytes;
+}
 
 /** Last use of an entry, for cross-store recency comparison. */
 function lastUsedAtMs(entry: { createdAtMs: number; lastHitAtMs: number | null }): number {
@@ -316,15 +348,16 @@ function lastUsedAtMs(entry: { createdAtMs: number; lastHitAtMs: number | null }
  */
 function enforceCombinedCap(): void {
   const cap = cacheMaxEntries();
-  while (store.size + streamStore.size > cap) {
+  const byteCap = cacheMaxBytes();
+  while (store.size + streamStore.size > cap || retainedCacheBytes > byteCap) {
     const jsonKey = store.keys().next().value as string | undefined;
     const streamKey = streamStore.keys().next().value as string | undefined;
     const jsonAge = jsonKey === undefined ? Infinity : lastUsedAtMs(store.get(jsonKey)!);
     const streamAge = streamKey === undefined ? Infinity : lastUsedAtMs(streamStore.get(streamKey)!);
     if (streamKey !== undefined && streamAge <= jsonAge) {
-      streamStore.delete(streamKey);
+      removeStreamEntry(streamKey);
     } else if (jsonKey !== undefined) {
-      store.delete(jsonKey);
+      removeJsonEntry(jsonKey);
       // Evicting in memory but not on disk would let the table grow without
       // bound and let a restart resurrect entries the LRU already gave up on.
       scheduleRowDelete(jsonKey);
@@ -432,6 +465,7 @@ export function __resetMemoryForTests(): void {
   drainPendingWrites();
   store.clear();
   streamStore.clear();
+  retainedCacheBytes = 0;
   lookupHits = 0;
   lookupMisses = 0;
 }
@@ -449,7 +483,7 @@ export function getCachedResponse(cacheKey: string, now = Date.now()): CachedRes
   }
 
   if (now - entry.createdAtMs > cacheTtlMs()) {
-    store.delete(cacheKey);
+    removeJsonEntry(cacheKey);
     // The row would otherwise outlive its memory entry until the next restart.
     scheduleRowDelete(cacheKey);
     lookupMisses += 1;
@@ -508,8 +542,9 @@ export function storeCachedResponse(cacheKey: string, input: StoreInput, now = D
 
   // Delete-then-set so an overwrite also refreshes recency order. Any hits
   // still waiting to be flushed counted the old answer, not this one.
-  store.delete(cacheKey);
+  removeJsonEntry(cacheKey);
   dirtyHitCounts.delete(cacheKey);
+  const sizeBytes = Buffer.byteLength(bodyJson, 'utf8') + 256;
   store.set(cacheKey, {
     body: input.body,
     platform: input.platform,
@@ -520,7 +555,9 @@ export function storeCachedResponse(cacheKey: string, input: StoreInput, now = D
     hitCount: 0,
     createdAtMs: now,
     lastHitAtMs: null,
+    sizeBytes,
   });
+  retainedCacheBytes += sizeBytes;
 
   // Evict least-recently-used beyond the cap, which is shared with the
   // streaming store. The count only drifts by one per insert, so at most one
@@ -609,6 +646,8 @@ export function loadCacheFromDb(now = Date.now()): void {
     for (const row of rows.reverse()) {
       if (now - row.created_at_ms > cacheTtlMs()) continue; // aged between purge and read
       try {
+        removeJsonEntry(row.cache_key);
+        const sizeBytes = Buffer.byteLength(row.body_json, 'utf8') + 256;
         store.set(row.cache_key, {
           body: JSON.parse(row.body_json),
           platform: row.platform,
@@ -619,11 +658,14 @@ export function loadCacheFromDb(now = Date.now()): void {
           hitCount: row.hit_count,
           createdAtMs: row.created_at_ms,
           lastHitAtMs: row.last_hit_at_ms,
+          sizeBytes,
         });
+        retainedCacheBytes += sizeBytes;
       } catch {
         // corrupt body — skip; it will be overwritten on the next store
       }
     }
+    enforceCombinedCap();
   } catch {
     // best-effort: DB unavailable at startup → memory-only cache
   }
@@ -673,7 +715,7 @@ export function getCachedStreamResponse(cacheKey: string, now = Date.now()): Cac
   }
 
   if (now - entry.createdAtMs > cacheTtlMs()) {
-    streamStore.delete(cacheKey);
+    removeStreamEntry(cacheKey);
     lookupMisses += 1;
     return null;
   }
@@ -703,10 +745,16 @@ export function getCachedStreamResponse(cacheKey: string, now = Date.now()): Cac
  */
 export function storeCachedStreamResponse(cacheKey: string, input: StoreStreamInput, now = Date.now()): void {
   if (!Array.isArray(input.frames) || input.frames.length === 0) return;
+  let frameBytes = 0;
+  for (const frame of input.frames) {
+    frameBytes += Buffer.byteLength(frame, 'utf8');
+    if (frameBytes > STREAM_CACHE_MAX_BYTES) return;
+  }
+  if (frameBytes === 0) return;
   const sse = input.frames.join('');
-  if (sse.length === 0 || Buffer.byteLength(sse) > STREAM_CACHE_MAX_BYTES) return;
 
-  streamStore.delete(cacheKey);
+  removeStreamEntry(cacheKey);
+  const sizeBytes = frameBytes + 256;
   streamStore.set(cacheKey, {
     sse,
     platform: input.platform,
@@ -717,7 +765,9 @@ export function storeCachedStreamResponse(cacheKey: string, input: StoreStreamIn
     hitCount: 0,
     createdAtMs: now,
     lastHitAtMs: null,
+    sizeBytes,
   });
+  retainedCacheBytes += sizeBytes;
 
   enforceCombinedCap();
 }
@@ -795,6 +845,7 @@ export function clearCache(): number {
   const removed = store.size + streamStore.size;
   store.clear();
   streamStore.clear();
+  retainedCacheBytes = 0;
   pendingWrites.length = 0;
   dropPendingHitCounts();
   // The lookup tallies describe the cache that just went away; keeping them
