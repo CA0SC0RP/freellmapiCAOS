@@ -4,6 +4,7 @@ import { createApp } from '../../app.js';
 import { initDb, getDb, getUnifiedApiKey } from '../../db/index.js';
 import { mintDashboardToken } from '../helpers/auth.js';
 import { effortFromAnthropicThinking } from '../../routes/anthropic.js';
+import { clearReasoningMemory, rememberReasoning, rememberedReasoningFor, __getReasoningMemoryStatsForTests } from '../../routes/proxy.js';
 
 // Request-side reasoning control (reasoning_effort / reasoning:{effort} /
 // Anthropic thinking:{budget_tokens}) and inline <think> extraction, driven
@@ -104,6 +105,27 @@ function anthropicEvents(text: string): Array<{ event: string; data: any }> {
   }
   return events;
 }
+
+describe('reasoning trace memory bounds', () => {
+  beforeEach(() => clearReasoningMemory());
+  afterEach(() => clearReasoningMemory());
+
+  it('evicts least-recently-used traces when the shared byte budget is reached', () => {
+    const payload = (n: number) => `${n}:${'r'.repeat(1024 * 1024 - 2)}`;
+    for (let i = 0; i < 20; i++) rememberReasoning(`session-${i}`, 'provider/model', payload(i));
+
+    const stats = __getReasoningMemoryStatsForTests();
+    expect(stats.bytes).toBeLessThanOrEqual(16 * 1024 * 1024);
+    expect(stats.entries).toBeLessThan(20);
+    expect(rememberedReasoningFor('session-0', 'provider/model')).toBeUndefined();
+    expect(rememberedReasoningFor('session-19', 'provider/model')).toBe(payload(19));
+  });
+
+  it('does not retain one reasoning trace above the per-entry ceiling', () => {
+    rememberReasoning('oversized-session', 'provider/model', 'x'.repeat(2 * 1024 * 1024));
+    expect(__getReasoningMemoryStatsForTests()).toEqual({ entries: 0, bytes: 0 });
+  });
+});
 
 describe('request-side reasoning control (end-to-end)', () => {
   let app: Express;
