@@ -723,6 +723,7 @@ export function loadCacheFromDb(now = Date.now()): void {
  * materializes; this is the store-side backstop.
  */
 export const STREAM_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+export const STREAM_CACHE_MAX_FRAMES = 4096;
 
 export interface CachedStreamResponse {
   /** The whole SSE sequence, ready to write in one go. */
@@ -786,7 +787,7 @@ export function getCachedStreamResponse(cacheKey: string, now = Date.now()): Cac
  * entry shares the JSON store's entry cap.
  */
 export function storeCachedStreamResponse(cacheKey: string, input: StoreStreamInput, now = Date.now()): void {
-  if (!Array.isArray(input.frames) || input.frames.length === 0) return;
+  if (!Array.isArray(input.frames) || input.frames.length === 0 || input.frames.length > STREAM_CACHE_MAX_FRAMES) return;
   let frameBytes = 0;
   for (const frame of input.frames) {
     frameBytes += Buffer.byteLength(frame, 'utf8');
