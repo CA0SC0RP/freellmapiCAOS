@@ -106,8 +106,9 @@ describe('response cache', () => {
   it('enforces one byte budget across JSON and SSE cache entries', () => {
     process.env.RESPONSE_CACHE_MAX_BYTES = '1048576';
     expect(cacheMaxBytes()).toBe(1024 * 1024);
-    store('budget-json', 'j'.repeat(600 * 1024));
-    expect(getCachedResponse('budget-json')).not.toBeNull();
+    const base = Date.now();
+    store('budget-json', 'j'.repeat(600 * 1024), base);
+    expect(getCachedResponse('budget-json', base + 1)).not.toBeNull();
     storeCachedStreamResponse('budget-stream', {
       frames: ['s'.repeat(600 * 1024)],
       platform: 'test',
@@ -115,10 +116,10 @@ describe('response cache', () => {
       keyId: null,
       promptTokens: 1,
       completionTokens: 1,
-    });
+    }, base + 2);
     expect(getCacheMemoryBytes()).toBeLessThanOrEqual(1024 * 1024);
-    expect(getCachedResponse('budget-json')).toBeNull();
-    expect(getCachedStreamResponse('budget-stream')).not.toBeNull();
+    expect(getCachedResponse('budget-json', base + 3)).toBeNull();
+    expect(getCachedStreamResponse('budget-stream', base + 3)).not.toBeNull();
   });
 
   it('is stable regardless of object key order', () => {
