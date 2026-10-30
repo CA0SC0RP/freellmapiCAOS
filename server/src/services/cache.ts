@@ -635,11 +635,19 @@ export function loadCacheFromDb(now = Date.now()): void {
     const cap = cacheMaxEntries();
     const rows = db.prepare(
       `SELECT cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms
-         FROM response_cache
-        WHERE length(CAST(body_json AS BLOB)) <= ?
-        ORDER BY created_at_ms DESC
+         FROM (
+           SELECT cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms,
+                  SUM(length(CAST(body_json AS BLOB)) + 256) OVER (
+                    ORDER BY created_at_ms DESC, cache_key DESC
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                  ) AS cumulative_bytes
+             FROM response_cache
+            WHERE length(CAST(body_json AS BLOB)) <= ?
+         )
+        WHERE cumulative_bytes <= ?
+        ORDER BY created_at_ms DESC, cache_key DESC
         LIMIT ?`,
-    ).all(JSON_CACHE_MAX_BYTES, cap) as Array<{
+    ).all(JSON_CACHE_MAX_BYTES, cacheMaxBytes(), cap) as Array<{
       cache_key: string;
       body_json: string;
       platform: string;
