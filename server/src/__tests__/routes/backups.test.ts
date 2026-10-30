@@ -129,6 +129,25 @@ describe('Backups API', () => {
     expect(created.body.backup.tables).toEqual(['models']);
   });
 
+  it('writes large tables in bounded INSERT batches and restores every row', () => {
+    const db = getDb();
+    db.exec('CREATE TABLE backup_stream_probe (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)');
+    const insert = db.prepare('INSERT INTO backup_stream_probe (payload) VALUES (?)');
+    for (let i = 0; i < 250; i++) insert.run(`row-${i}`);
+
+    try {
+      const backup = createBackup(db, { tables: ['backup_stream_probe'] });
+      const sql = fs.readFileSync(dumpPath(backup.id), 'utf8');
+      // 250 rows must be emitted as 100 + 100 + 50, not one unbounded query.
+      expect(sql.match(/INSERT INTO "backup_stream_probe"/g)).toHaveLength(3);
+      db.exec('DELETE FROM backup_stream_probe');
+      restoreBackup(db, backup.id);
+      expect((db.prepare('SELECT COUNT(*) AS n FROM backup_stream_probe').get() as { n: number }).n).toBe(250);
+    } finally {
+      db.exec('DROP TABLE IF EXISTS backup_stream_probe');
+    }
+  });
+
   it('prefixes scheduled backups with auto-', () => {
     const manual = createBackup(getDb(), { tables: [], source: 'manual', backupPath: '' });
     expect(manual.filename).toMatch(/^backup-.*\.sql$/);
