@@ -78,6 +78,19 @@ describe('auto backup dump retention (#1675)', () => {
     expect(fs.existsSync(paths[2])).toBe(true);
   });
 
+  it('prunes a large stale backlog in bounded batches', () => {
+    const db = getDb();
+    const insert = db.prepare(`
+      INSERT INTO backups (filename, filepath, filesize, is_full, source, created_at, tables_json)
+      VALUES (?, ?, 0, 1, 'scheduled', ?, '[]')
+    `);
+    for (let i = 0; i < 205; i++) {
+      insert.run(`stale-${i}.sql`, path.join(dataDir, `missing-${i}.sql`), new Date(1_700_000_000_000 + i * 1000).toISOString());
+    }
+    expect(pruneAutoDumps(db, 10)).toBe(195);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM backups WHERE source = 'scheduled'").get() as { n: number }).n).toBe(10);
+  });
+
   it('never deletes manual or pre-restore dumps', () => {
     process.env.AUTO_BACKUP_DUMP_RETENTION = '0';
     const manual = createBackup(getDb(), { source: 'manual' });
