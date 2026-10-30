@@ -230,7 +230,7 @@ export function rememberReasoning(sessionKey: string | undefined, modelKey: stri
   }
 
   // Enforce both entry and byte ceilings, evicting the least-recently-used
-  // reasoning traces first. The map is kept in the same order as lastUsed.
+  // reasoning traces first. Map insertion order tracks the most recent access.
   while (reasoningMemory.size > 1000 || reasoningMemoryBytes > REASONING_MAX_TOTAL_BYTES) {
     const oldest = reasoningMemory.keys().next().value as string | undefined;
     if (oldest === undefined) break;
