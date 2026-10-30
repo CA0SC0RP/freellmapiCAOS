@@ -2812,7 +2812,10 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
                 toolCallAcc.set(idx, { id: undefined, name: '', args: '' });
               }
               const acc = toolCallAcc.get(idx)!;
-              if (tc.id && !acc.id) acc.id = tc.id;
+              if (tc.id && !acc.id) {
+                accountStreamOutput(tc.id);
+                acc.id = tc.id;
+              }
               if (tc.function?.name) {
                 accountStreamOutput(tc.function.name);
                 acc.name += tc.function.name;
