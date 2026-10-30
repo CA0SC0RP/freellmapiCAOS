@@ -401,27 +401,39 @@ export function createBackup(
  */
 export function pruneAutoDumps(db: Db, keep = getAutoDumpRetention()): number {
   if (keep <= 0) return 0;
-  const stale = db.prepare(`
-    SELECT id FROM backups
-    WHERE source IN (${[...AUTO_DUMP_SOURCES].map(() => '?').join(', ')})
-      AND id NOT IN (
-        SELECT id FROM backups
-        WHERE source IN (${[...AUTO_DUMP_SOURCES].map(() => '?').join(', ')})
-        ORDER BY created_at DESC, id DESC
-        LIMIT ?
-      )
-    ORDER BY id ASC
-  `).all(...AUTO_DUMP_SOURCES, ...AUTO_DUMP_SOURCES, keep) as { id: number }[];
 
+  // Bound the stale-id materialization: an install upgrading from an old build
+  // may have accumulated a very large backlog of automatic dumps.
+  const batchSize = 100;
+  let lastId = 0;
   let deleted = 0;
-  for (const row of stale) {
-    try {
-      deleteBackup(db, row.id);
-      deleted += 1;
-    } catch {
-      // Path outside the data directory (or row vanished mid-sweep): not ours
-      // to delete; the next sweep tries again, same as today's behaviour.
+  for (;;) {
+    const stale = db.prepare(`
+      SELECT id FROM backups
+      WHERE source IN (${[...AUTO_DUMP_SOURCES].map(() => '?').join(', ')})
+        AND id > ?
+        AND id NOT IN (
+          SELECT id FROM backups
+          WHERE source IN (${[...AUTO_DUMP_SOURCES].map(() => '?').join(', ')})
+          ORDER BY created_at DESC, id DESC
+          LIMIT ?
+        )
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(...AUTO_DUMP_SOURCES, lastId, ...AUTO_DUMP_SOURCES, keep, batchSize) as { id: number }[];
+
+    if (stale.length === 0) break;
+    for (const row of stale) {
+      lastId = row.id;
+      try {
+        deleteBackup(db, row.id);
+        deleted += 1;
+      } catch {
+        // Path outside the data directory (or row vanished mid-sweep): not ours
+        // to delete; the next sweep tries again, same as today's behaviour.
+      }
     }
+    if (stale.length < batchSize) break;
   }
   return deleted;
 }
