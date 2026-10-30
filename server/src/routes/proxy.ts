@@ -212,7 +212,10 @@ const PLATFORMS_REQUIRING_REASONING_ECHO = new Set(['opencode']);
 export function rememberReasoning(sessionKey: string | undefined, modelKey: string, reasoning: string) {
   if (!sessionKey || !reasoning) return;
   const sizeBytes = Buffer.byteLength(reasoning, 'utf8') + 256;
-  if (sizeBytes > REASONING_MAX_ENTRY_BYTES) return;
+  if (sizeBytes > REASONING_MAX_ENTRY_BYTES) {
+    removeRememberedReasoning(sessionKey);
+    return;
+  }
 
   // Refresh existing sessions to MRU and keep an exact running byte total.
   removeRememberedReasoning(sessionKey);
@@ -252,7 +255,11 @@ export function rememberedReasoningFor(sessionKey: string, modelKey: string): st
     removeRememberedReasoning(sessionKey);
     return undefined;
   }
-  return entry.modelKey === modelKey ? entry.reasoning : undefined;
+  if (entry.modelKey !== modelKey) return undefined;
+  entry.lastUsed = Date.now();
+  reasoningMemory.delete(sessionKey);
+  reasoningMemory.set(sessionKey, entry);
+  return entry.reasoning;
 }
 
 // Put the remembered trace back on the newest assistant turn that lost it.
