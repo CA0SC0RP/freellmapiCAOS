@@ -263,29 +263,50 @@ function sqliteCreateTable(db: Db, table: string): string | null {
   return `${row.sql.replace(/^CREATE TABLE/i, 'CREATE TABLE IF NOT EXISTS')};`;
 }
 
-function sqliteDumpTable(db: Db, table: string): string {
-  const columns = (db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map((c) => c.name);
-  const rows = db.prepare(`SELECT * FROM "${table}"`).all() as Record<string, unknown>[];
-  const lines: string[] = [`DELETE FROM "${table}";`];
-  if (rows.length > 0) {
-    const columnList = columns.map((c) => `"${c}"`).join(', ');
-    const valueRows = rows.map((row) => `(${columns.map((c) => sqliteEscape(row[c])).join(', ')})`);
-    lines.push(`INSERT INTO "${table}" (${columnList}) VALUES\n  ${valueRows.join(',\n  ')};`);
+// Keep each SQLite read and generated INSERT bounded. The previous implementation
+// called SELECT * without a limit and retained the complete SQL dump in a
+// second, much larger string (BLOB values expand to hexadecimal text).
+const BACKUP_BATCH_ROWS = 100;
+
+function writeAll(fd: number, value: string): void {
+  const bytes = Buffer.from(value, 'utf8');
+  let offset = 0;
+  while (offset < bytes.length) {
+    offset += fs.writeSync(fd, bytes, offset, bytes.length - offset);
   }
-  return lines.join('\n');
 }
 
 // No BEGIN/COMMIT in the body: restore runs the whole file inside one
 // db.transaction() so a failure halfway through rolls the database back to
-// where it started, and a nested BEGIN would abort that.
-function sqliteDump(db: Db, tables: string[], createdAt: string): string {
-  const lines = [renderHeader(db, tables, createdAt)];
-  for (const table of tables) {
-    const create = sqliteCreateTable(db, table);
-    if (create) lines.push(create);
-    lines.push(sqliteDumpTable(db, table));
+// where it started, and a nested BEGIN would abort that. Rows are paged in
+// bounded batches and written directly to disk instead of assembling the
+// entire dump in process memory.
+function writeSqliteDump(db: Db, tables: string[], createdAt: string, filepath: string): void {
+  const fd = fs.openSync(filepath, 'wx', 0o600);
+  try {
+    writeAll(fd, renderHeader(db, tables, createdAt));
+    for (const table of tables) {
+      const create = sqliteCreateTable(db, table);
+      if (create) writeAll(fd, create + '\n');
+      writeAll(fd, `DELETE FROM "${table}";\n`);
+
+      const columns = (db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map((c) => c.name);
+      if (columns.length === 0) continue;
+      const columnList = columns.map((c) => `"${c}"`).join(', ');
+      let offset = 0;
+      while (true) {
+        const rows = db.prepare(`SELECT * FROM "${table}" LIMIT ? OFFSET ?`)
+          .all(BACKUP_BATCH_ROWS, offset) as Record<string, unknown>[];
+        if (rows.length === 0) break;
+        const valueRows = rows.map((row) => `(${columns.map((c) => sqliteEscape(row[c])).join(', ')})`);
+        writeAll(fd, `INSERT INTO "${table}" (${columnList}) VALUES\n  ${valueRows.join(',\n  ')};\n`);
+        offset += rows.length;
+      }
+      writeAll(fd, '\n');
+    }
+  } finally {
+    fs.closeSync(fd);
   }
-  return `${lines.join('\n')}\n`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -315,8 +336,18 @@ export function createBackup(
   const dir = resolveBackupDir(db, opts.backupPath ?? readBackupSchedule().backupPath);
   const filepath = path.join(dir, filename);
 
-  fs.writeFileSync(filepath, sqliteDump(db, tables, createdAt), { encoding: 'utf8', mode: 0o600 });
-  restrictToOwner(filepath);
+  // Build beside the final file and publish it with one rename: a failed
+  // backup never leaves a truncated .sql file that appears complete.
+  const temporaryPath = `${filepath}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+  try {
+    writeSqliteDump(db, tables, createdAt, temporaryPath);
+    restrictToOwner(temporaryPath);
+    fs.renameSync(temporaryPath, filepath);
+    restrictToOwner(filepath);
+  } catch (err) {
+    try { fs.unlinkSync(temporaryPath); } catch { /* best-effort cleanup */ }
+    throw err;
+  }
 
   const filesize = fs.statSync(filepath).size;
   const result = db.prepare(
