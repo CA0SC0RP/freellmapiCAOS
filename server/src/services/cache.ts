@@ -315,6 +315,7 @@ interface StreamCacheEntry {
 }
 const streamStore = new Map<string, StreamCacheEntry>();
 let retainedCacheBytes = 0;
+const dirtyHitCounts = new Map<string, { hitCount: number; lastHitAtMs: number }>();
 
 function removeJsonEntry(key: string): void {
   const entry = store.get(key);
@@ -432,7 +433,6 @@ function scheduleRowDelete(cacheKey: string): void {
 // A pending count belongs to the entry that earned it: clearCache() and a
 // re-store both drop it, so a stale count is never flushed onto a fresh row.
 const HIT_FLUSH_DELAY_MS = 2_000;
-const dirtyHitCounts = new Map<string, { hitCount: number; lastHitAtMs: number }>();
 let hitFlushTimer: NodeJS.Timeout | undefined;
 function scheduleHitCountFlush(): void {
   if (hitFlushTimer) return;
