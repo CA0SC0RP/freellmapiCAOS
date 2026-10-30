@@ -302,6 +302,15 @@ function writeSqliteDump(db: Db, tables: string[], createdAt: string, filepath: 
       writeDumpChunk(fd, `DELETE FROM "${table}";\n`, state);
       if (columns.length === 0) continue;
       const columnList = columns.map((c) => `"${c}"`).join(', ');
+      // Estimate escaped SQL output inside SQLite before materializing rows.
+      // Text quoting and BLOB hex encoding can each expand source bytes by 2x;
+      // fixed per-cell overhead also accounts for SQL delimiters and row syntax.
+      const sizeTerms = columns.map((c) => `COALESCE(length(CAST("${c}" AS BLOB)), 0) * 2 + 32`).join(' + ');
+      const estimate = db.prepare(`SELECT COALESCE(SUM(${sizeTerms}), 0) AS bytes FROM "${table}"`)
+        .get() as { bytes: number };
+      if (state.bytes + Number(estimate?.bytes ?? 0) > state.maxBytes) {
+        throw httpError(`SQL backup exceeds FREEAPI_SQL_BACKUP_MAX_BYTES (${state.maxBytes} bytes)`, 413);
+      }
       let offset = 0;
       for (;;) {
         const rows = db.prepare(`SELECT * FROM "${table}" LIMIT ? OFFSET ?`)
