@@ -39,6 +39,7 @@ import { requireAuth } from './middleware/requireAuth.js';
 import { createHostGuard } from './middleware/allowed-hosts.js';
 import { createProxyRateLimiter, createAdminRateLimiter } from './middleware/rateLimit.js';
 import { createJsonBodyAdmission } from './middleware/boundedJsonParser.js';
+import { createInferenceAdmission } from './middleware/inferenceAdmission.js';
 
 // Password-guess ceiling for GET /api/keys/export. Deliberately low: a real
 // user exports keys occasionally, never ten times a minute.
@@ -114,6 +115,9 @@ export function createApp(config?: Config) {
   // above everything below — its whole value is answering before any state or
   // credential is touched.
   app.use(createHostGuard(cfg.allowedHosts));
+  // Shared process-local ceiling across inference protocols; streaming responses
+  // hold a slot until finish or client disconnect.
+  const inferenceAdmission = createInferenceAdmission(cfg.proxyMaxConcurrentRequests);
   const allowedCorsOrigins = new Set([
     ...DEFAULT_DASHBOARD_ORIGINS,
     ...cfg.dashboardOrigins,
@@ -230,6 +234,7 @@ export function createApp(config?: Config) {
     ['/api/tags', '/api/version', '/api/show', '/api/chat', '/api/generate', '/api/embed', '/api/embeddings'],
     createProxyRateLimiter(cfg.proxyRateLimitRpm),
   );
+  app.use(['/api/chat', '/api/generate', '/api/embed', '/api/embeddings'], inferenceAdmission);
   app.use(ollamaRouter);
 
   // Admin API — all routes share an IP-based rate limiter to throttle
@@ -305,6 +310,8 @@ export function createApp(config?: Config) {
   // limiter (like docsRouter) so status polling doesn't draw down a caller's
   // request budget.
   app.use('/v1', providersRouter);
+  // Docs and provider-status endpoints above remain available during overload.
+  app.use('/v1', inferenceAdmission);
 
   // Separately revocable URL tokens for clients that cannot set headers.
   app.use('/v1/t/:token', createProxyRateLimiter(cfg.proxyRateLimitRpm));
@@ -328,6 +335,7 @@ export function createApp(config?: Config) {
 
   // Native Gemini wire surface for Gemini CLI and Gemini-lineage agents.
   app.use('/v1beta', createProxyRateLimiter(cfg.proxyRateLimitRpm));
+  app.use('/v1beta', inferenceAdmission);
   app.use('/v1beta', geminiRouter);
 
   // MCP server (Model Context Protocol over stateless Streamable HTTP):
@@ -336,6 +344,7 @@ export function createApp(config?: Config) {
   // /v1 (its own bucket): both surfaces guard the same unified key, so an
   // unauthenticated brute-force must not get a free throttle-less oracle here.
   app.use('/mcp', createProxyRateLimiter(cfg.proxyRateLimitRpm));
+  app.use('/mcp', inferenceAdmission);
   app.use('/mcp', mcpRouter);
 
   // Liveness / readiness probes for orchestrators (GET /livez, /readyz, #433).

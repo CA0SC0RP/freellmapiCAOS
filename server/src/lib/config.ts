@@ -18,6 +18,16 @@ const DEFAULT_RPM = 120;
 // box if a client genuinely sends more. The dashboard/admin surface keeps its
 // own smaller fixed ceiling.
 const DEFAULT_REQUEST_BODY_LIMIT_MB = 25;
+
+const DEFAULT_PROXY_MAX_CONCURRENT_REQUESTS = 8;
+
+function parseProxyMaxConcurrentRequests(): number {
+  const raw = process.env.PROXY_MAX_CONCURRENT_REQUESTS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_PROXY_MAX_CONCURRENT_REQUESTS;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n < 1 || n > 128) return DEFAULT_PROXY_MAX_CONCURRENT_REQUESTS;
+  return n;
+}
 const DEFAULT_JSON_BODY_MAX_CONCURRENT = 2;
 
 function parseJsonBodyMaxConcurrent(): number {
@@ -54,6 +64,8 @@ export interface Config {
   /** JSON body limit (bytes) for the LLM wire surfaces — see
    *  parseRequestBodyLimitBytes. REQUEST_BODY_LIMIT_MB overrides. */
   requestBodyLimitBytes: number;
+  /** Maximum simultaneous inference responses across all wire protocols. */
+  proxyMaxConcurrentRequests: number;
   /** Maximum simultaneous JSON body reads/parses across both Express parsers. */
   jsonBodyMaxConcurrent: number;
   nodeEnv: string;
@@ -102,6 +114,7 @@ export function loadConfig(): Config {
     proxyRateLimitRpm: parseRateLimitRpm(),
     requestBodyLimitBytes: parseRequestBodyLimitBytes(),
     jsonBodyMaxConcurrent: parseJsonBodyMaxConcurrent(),
+    proxyMaxConcurrentRequests: parseProxyMaxConcurrentRequests(),
     nodeEnv: process.env.NODE_ENV ?? 'development',
     serveStaticAssets: true,
     trustProxy: parseTrustProxy(),

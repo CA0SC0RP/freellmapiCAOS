@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadConfig } from '../../lib/config.js';
 
-const ENV_KEYS = ['PORT', 'HOST', 'FREEAPI_DB_PATH', 'DASHBOARD_ORIGINS', 'CLIENT_DIST', 'PROXY_RATE_LIMIT_RPM', 'NODE_ENV', 'TRUST_PROXY', 'JSON_BODY_MAX_CONCURRENT'];
+const ENV_KEYS = ['PORT', 'HOST', 'FREEAPI_DB_PATH', 'DASHBOARD_ORIGINS', 'CLIENT_DIST', 'PROXY_RATE_LIMIT_RPM', 'NODE_ENV', 'TRUST_PROXY', 'JSON_BODY_MAX_CONCURRENT', 'PROXY_MAX_CONCURRENT_REQUESTS'];
 
 afterEach(() => {
   ENV_KEYS.forEach(k => delete process.env[k]);
@@ -17,6 +17,7 @@ describe('loadConfig', () => {
     expect(cfg.clientDist).toBeNull();
     expect(cfg.proxyRateLimitRpm).toBe(120);
     expect(cfg.jsonBodyMaxConcurrent).toBe(2);
+    expect(cfg.proxyMaxConcurrentRequests).toBe(8);
     expect(cfg.serveStaticAssets).toBe(true);
   });
 
@@ -71,6 +72,18 @@ describe('loadConfig', () => {
     for (const value of ['0', '-1', '1.5', '129', 'Infinity', 'not-a-number']) {
       process.env.JSON_BODY_MAX_CONCURRENT = value;
       expect(loadConfig().jsonBodyMaxConcurrent).toBe(2);
+    }
+  });
+
+  it('parses PROXY_MAX_CONCURRENT_REQUESTS within the supported range', () => {
+    process.env.PROXY_MAX_CONCURRENT_REQUESTS = '12';
+    expect(loadConfig().proxyMaxConcurrentRequests).toBe(12);
+  });
+
+  it('uses the safe default for invalid PROXY_MAX_CONCURRENT_REQUESTS values', () => {
+    for (const value of ['0', '-1', '1.5', '129', 'Infinity', 'NaN', 'invalid']) {
+      process.env.PROXY_MAX_CONCURRENT_REQUESTS = value;
+      expect(loadConfig().proxyMaxConcurrentRequests).toBe(8);
     }
   });
 
