@@ -112,6 +112,17 @@ export function cacheMaxEntries(): number {
 /** Maximum serialized JSON response retained by one cache entry. */
 export const JSON_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 
+/** Shared memory budget for JSON and SSE entries, including a small per-entry overhead. */
+const DEFAULT_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+export function cacheMaxBytes(): number {
+  const raw = process.env.RESPONSE_CACHE_MAX_BYTES;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_CACHE_MAX_BYTES;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 1024 * 1024 && value <= 512 * 1024 * 1024
+    ? value
+    : DEFAULT_CACHE_MAX_BYTES;
+}
+
 // A request is cacheable only when its temperature is omitted (caller accepts
 // the provider default and is fine with a stable answer) or at/below the cap.
 export function isCacheableTemperature(temperature?: number | null): boolean {
@@ -276,6 +287,7 @@ interface CacheEntry {
   hitCount: number;
   createdAtMs: number;
   lastHitAtMs: number | null;
+  sizeBytes: number;
 }
 
 // Insertion-ordered map used as an LRU: the first key is the least-recently
@@ -299,8 +311,30 @@ interface StreamCacheEntry {
   hitCount: number;
   createdAtMs: number;
   lastHitAtMs: number | null;
+  sizeBytes: number;
 }
 const streamStore = new Map<string, StreamCacheEntry>();
+let retainedCacheBytes = 0;
+const dirtyHitCounts = new Map<string, { hitCount: number; lastHitAtMs: number }>();
+
+function removeJsonEntry(key: string): void {
+  const entry = store.get(key);
+  if (!entry) return;
+  store.delete(key);
+  retainedCacheBytes = Math.max(0, retainedCacheBytes - entry.sizeBytes);
+  dirtyHitCounts.delete(key);
+}
+
+function removeStreamEntry(key: string): void {
+  const entry = streamStore.get(key);
+  if (!entry) return;
+  streamStore.delete(key);
+  retainedCacheBytes = Math.max(0, retainedCacheBytes - entry.sizeBytes);
+}
+
+export function getCacheMemoryBytes(): number {
+  return retainedCacheBytes;
+}
 
 /** Last use of an entry, for cross-store recency comparison. */
 function lastUsedAtMs(entry: { createdAtMs: number; lastHitAtMs: number | null }): number {
@@ -316,15 +350,16 @@ function lastUsedAtMs(entry: { createdAtMs: number; lastHitAtMs: number | null }
  */
 function enforceCombinedCap(): void {
   const cap = cacheMaxEntries();
-  while (store.size + streamStore.size > cap) {
+  const byteCap = cacheMaxBytes();
+  while (store.size + streamStore.size > cap || retainedCacheBytes > byteCap) {
     const jsonKey = store.keys().next().value as string | undefined;
     const streamKey = streamStore.keys().next().value as string | undefined;
     const jsonAge = jsonKey === undefined ? Infinity : lastUsedAtMs(store.get(jsonKey)!);
     const streamAge = streamKey === undefined ? Infinity : lastUsedAtMs(streamStore.get(streamKey)!);
     if (streamKey !== undefined && streamAge <= jsonAge) {
-      streamStore.delete(streamKey);
+      removeStreamEntry(streamKey);
     } else if (jsonKey !== undefined) {
-      store.delete(jsonKey);
+      removeJsonEntry(jsonKey);
       // Evicting in memory but not on disk would let the table grow without
       // bound and let a restart resurrect entries the LRU already gave up on.
       scheduleRowDelete(jsonKey);
@@ -356,12 +391,19 @@ let lookupMisses = 0;
 // in-memory map is already correct by then, and a crash in the gap only costs
 // a cache entry. Individually wrapped so one bad write cannot take down the
 // drain, and skipped entirely when persistence is off.
-const pendingWrites: Array<() => void> = [];
+const MAX_PENDING_WRITES = 1024;
+const MAX_PENDING_WRITE_BYTES = 8 * 1024 * 1024;
+const pendingWrites: Array<{ op: () => void; bytes: number }> = [];
+let pendingWriteBytes = 0;
 let drainScheduled = false;
 
-function schedulePersist(op: () => void): void {
+function schedulePersist(op: () => void, estimatedBytes = 256): void {
   if (!cachePersistenceEnabled()) return;
-  pendingWrites.push(op);
+  // Cache persistence is best-effort. Never let a slow SQLite write path
+  // accumulate closures retaining response bodies without a memory ceiling.
+  if (pendingWrites.length >= MAX_PENDING_WRITES || pendingWriteBytes + estimatedBytes > MAX_PENDING_WRITE_BYTES) return;
+  pendingWrites.push({ op, bytes: estimatedBytes });
+  pendingWriteBytes += estimatedBytes;
   if (drainScheduled) return;
   drainScheduled = true;
   setImmediate(drainPendingWrites);
@@ -370,9 +412,10 @@ function schedulePersist(op: () => void): void {
 function drainPendingWrites(): void {
   drainScheduled = false;
   const ops = pendingWrites.splice(0, pendingWrites.length);
-  for (const op of ops) {
+  pendingWriteBytes = 0;
+  for (const item of ops) {
     try {
-      op();
+      item.op();
     } catch {
       // best-effort: a DB failure degrades to memory-only, never to a 500
     }
@@ -390,7 +433,6 @@ function scheduleRowDelete(cacheKey: string): void {
 // A pending count belongs to the entry that earned it: clearCache() and a
 // re-store both drop it, so a stale count is never flushed onto a fresh row.
 const HIT_FLUSH_DELAY_MS = 2_000;
-const dirtyHitCounts = new Map<string, { hitCount: number; lastHitAtMs: number }>();
 let hitFlushTimer: NodeJS.Timeout | undefined;
 function scheduleHitCountFlush(): void {
   if (hitFlushTimer) return;
@@ -402,7 +444,7 @@ function scheduleHitCountFlush(): void {
     schedulePersist(() => {
       const stmt = getDb().prepare('UPDATE response_cache SET hit_count = ?, last_hit_at_ms = ? WHERE cache_key = ?');
       for (const [cacheKey, hit] of batch) stmt.run(hit.hitCount, hit.lastHitAtMs, cacheKey);
-    });
+    }, batch.size * 64);
   }, HIT_FLUSH_DELAY_MS);
   hitFlushTimer.unref();
 }
@@ -432,6 +474,7 @@ export function __resetMemoryForTests(): void {
   drainPendingWrites();
   store.clear();
   streamStore.clear();
+  retainedCacheBytes = 0;
   lookupHits = 0;
   lookupMisses = 0;
 }
@@ -449,7 +492,7 @@ export function getCachedResponse(cacheKey: string, now = Date.now()): CachedRes
   }
 
   if (now - entry.createdAtMs > cacheTtlMs()) {
-    store.delete(cacheKey);
+    removeJsonEntry(cacheKey);
     // The row would otherwise outlive its memory entry until the next restart.
     scheduleRowDelete(cacheKey);
     lookupMisses += 1;
@@ -508,8 +551,9 @@ export function storeCachedResponse(cacheKey: string, input: StoreInput, now = D
 
   // Delete-then-set so an overwrite also refreshes recency order. Any hits
   // still waiting to be flushed counted the old answer, not this one.
-  store.delete(cacheKey);
+  removeJsonEntry(cacheKey);
   dirtyHitCounts.delete(cacheKey);
+  const sizeBytes = Buffer.byteLength(bodyJson, 'utf8') + 256;
   store.set(cacheKey, {
     body: input.body,
     platform: input.platform,
@@ -520,7 +564,9 @@ export function storeCachedResponse(cacheKey: string, input: StoreInput, now = D
     hitCount: 0,
     createdAtMs: now,
     lastHitAtMs: null,
+    sizeBytes,
   });
+  retainedCacheBytes += sizeBytes;
 
   // Evict least-recently-used beyond the cap, which is shared with the
   // streaming store. The count only drifts by one per insert, so at most one
@@ -562,7 +608,7 @@ export function storeCachedResponse(cacheKey: string, input: StoreInput, now = D
       entry.lastHitAtMs,
       expiresAtMs,
     );
-  });
+  }, Buffer.byteLength(bodyJson, 'utf8') + 256);
 }
 
 /**
@@ -587,43 +633,81 @@ export function loadCacheFromDb(now = Date.now()): void {
     // millions of persisted rows cannot materialize the whole table at startup.
     db.prepare('DELETE FROM response_cache WHERE length(CAST(body_json AS BLOB)) > ?').run(JSON_CACHE_MAX_BYTES);
     const cap = cacheMaxEntries();
-    const rows = db.prepare(
-      `SELECT cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms
-         FROM response_cache
-        WHERE length(CAST(body_json AS BLOB)) <= ?
-        ORDER BY created_at_ms DESC
-        LIMIT ?`,
-    ).all(JSON_CACHE_MAX_BYTES, cap) as Array<{
-      cache_key: string;
-      body_json: string;
-      platform: string;
-      model_id: string;
-      key_id: number | null;
-      prompt_tokens: number;
-      completion_tokens: number;
-      hit_count: number;
-      created_at_ms: number;
-      last_hit_at_ms: number | null;
-    }>;
-    // SQL returned newest first; reverse to rebuild the LRU oldest → newest.
-    for (const row of rows.reverse()) {
-      if (now - row.created_at_ms > cacheTtlMs()) continue; // aged between purge and read
-      try {
-        store.set(row.cache_key, {
-          body: JSON.parse(row.body_json),
-          platform: row.platform,
-          modelId: row.model_id,
-          keyId: row.key_id,
-          promptTokens: row.prompt_tokens,
-          completionTokens: row.completion_tokens,
-          hitCount: row.hit_count,
-          createdAtMs: row.created_at_ms,
-          lastHitAtMs: row.last_hit_at_ms,
-        });
-      } catch {
-        // corrupt body — skip; it will be overwritten on the next store
+    const byteCap = cacheMaxBytes();
+    const batchSize = 8;
+    const hydrated: Array<{ key: string; entry: CacheEntry }> = [];
+    let offset = 0;
+    let loadedBytes = 0;
+    let stop = false;
+
+    // Fetch newest rows in small batches. This bounds both SQLite result
+    // materialization and JavaScript parsing while respecting a cumulative
+    // byte budget; a single SELECT over thousands of 2 MiB rows would defeat
+    // the in-memory cap before LRU eviction could run.
+    while (!stop && hydrated.length < cap && loadedBytes < byteCap) {
+      const rows = db.prepare(
+        `SELECT cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms
+           FROM response_cache
+          WHERE length(CAST(body_json AS BLOB)) <= ?
+          ORDER BY created_at_ms DESC, cache_key DESC
+          LIMIT ? OFFSET ?`,
+      ).all(JSON_CACHE_MAX_BYTES, batchSize, offset) as Array<{
+        cache_key: string;
+        body_json: string;
+        platform: string;
+        model_id: string;
+        key_id: number | null;
+        prompt_tokens: number;
+        completion_tokens: number;
+        hit_count: number;
+        created_at_ms: number;
+        last_hit_at_ms: number | null;
+      }>;
+      if (rows.length === 0) break;
+      offset += rows.length;
+
+      for (const row of rows) {
+        if (now - row.created_at_ms > cacheTtlMs()) continue;
+        const sizeBytes = Buffer.byteLength(row.body_json, 'utf8') + 256;
+        if (loadedBytes + sizeBytes > byteCap) {
+          stop = true;
+          break;
+        }
+        try {
+          hydrated.push({
+            key: row.cache_key,
+            entry: {
+              body: JSON.parse(row.body_json),
+              platform: row.platform,
+              modelId: row.model_id,
+              keyId: row.key_id,
+              promptTokens: row.prompt_tokens,
+              completionTokens: row.completion_tokens,
+              hitCount: row.hit_count,
+              createdAtMs: row.created_at_ms,
+              lastHitAtMs: row.last_hit_at_ms,
+              sizeBytes,
+            },
+          });
+          loadedBytes += sizeBytes;
+        } catch {
+          // corrupt body — skip; it will be overwritten on the next store
+        }
+        if (hydrated.length >= cap || loadedBytes >= byteCap) {
+          stop = true;
+          break;
+        }
       }
+      if (rows.length < batchSize) break;
     }
+
+    // Results were read newest-first; insert oldest-first to rebuild LRU order.
+    for (const { key, entry } of hydrated.reverse()) {
+      removeJsonEntry(key);
+      store.set(key, entry);
+      retainedCacheBytes += entry.sizeBytes;
+    }
+    enforceCombinedCap();
   } catch {
     // best-effort: DB unavailable at startup → memory-only cache
   }
@@ -639,6 +723,7 @@ export function loadCacheFromDb(now = Date.now()): void {
  * materializes; this is the store-side backstop.
  */
 export const STREAM_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+export const STREAM_CACHE_MAX_FRAMES = 4096;
 
 export interface CachedStreamResponse {
   /** The whole SSE sequence, ready to write in one go. */
@@ -673,7 +758,7 @@ export function getCachedStreamResponse(cacheKey: string, now = Date.now()): Cac
   }
 
   if (now - entry.createdAtMs > cacheTtlMs()) {
-    streamStore.delete(cacheKey);
+    removeStreamEntry(cacheKey);
     lookupMisses += 1;
     return null;
   }
@@ -702,11 +787,17 @@ export function getCachedStreamResponse(cacheKey: string, now = Date.now()): Cac
  * entry shares the JSON store's entry cap.
  */
 export function storeCachedStreamResponse(cacheKey: string, input: StoreStreamInput, now = Date.now()): void {
-  if (!Array.isArray(input.frames) || input.frames.length === 0) return;
+  if (!Array.isArray(input.frames) || input.frames.length === 0 || input.frames.length > STREAM_CACHE_MAX_FRAMES) return;
+  let frameBytes = 0;
+  for (const frame of input.frames) {
+    frameBytes += Buffer.byteLength(frame, 'utf8');
+    if (frameBytes > STREAM_CACHE_MAX_BYTES) return;
+  }
+  if (frameBytes === 0) return;
   const sse = input.frames.join('');
-  if (sse.length === 0 || Buffer.byteLength(sse) > STREAM_CACHE_MAX_BYTES) return;
 
-  streamStore.delete(cacheKey);
+  removeStreamEntry(cacheKey);
+  const sizeBytes = frameBytes + 256;
   streamStore.set(cacheKey, {
     sse,
     platform: input.platform,
@@ -717,7 +808,9 @@ export function storeCachedStreamResponse(cacheKey: string, input: StoreStreamIn
     hitCount: 0,
     createdAtMs: now,
     lastHitAtMs: null,
+    sizeBytes,
   });
+  retainedCacheBytes += sizeBytes;
 
   enforceCombinedCap();
 }
@@ -795,7 +888,9 @@ export function clearCache(): number {
   const removed = store.size + streamStore.size;
   store.clear();
   streamStore.clear();
+  retainedCacheBytes = 0;
   pendingWrites.length = 0;
+  pendingWriteBytes = 0;
   dropPendingHitCounts();
   // The lookup tallies describe the cache that just went away; keeping them
   // would show a 90% hit rate next to zero entries right after a flush.

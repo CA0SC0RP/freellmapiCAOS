@@ -8,6 +8,8 @@ import {
   storeCachedStreamResponse,
   STREAM_CACHE_MAX_BYTES,
   JSON_CACHE_MAX_BYTES,
+  cacheMaxBytes,
+  getCacheMemoryBytes,
   getCacheStats,
   clearCache,
   loadCacheFromDb,
@@ -27,6 +29,7 @@ const CACHE_ENV = [
   'RESPONSE_CACHE_TTL_SECONDS',
   'RESPONSE_CACHE_MAX_TEMPERATURE',
   'RESPONSE_CACHE_MAX_ENTRIES',
+  'RESPONSE_CACHE_MAX_BYTES',
 ] as const;
 
 function msg(role: ChatMessage['role'], content: string): ChatMessage {
@@ -98,6 +101,37 @@ describe('response cache', () => {
     });
     expect(getCacheStats().entries).toBe(before);
     expect(getCachedResponse('oversized-json-entry')).toBeNull();
+  });
+
+  it('refuses to retain an SSE cache entry with too many tiny frames', () => {
+    storeCachedStreamResponse('too-many-frames', {
+      frames: Array.from({ length: 4097 }, () => 'x'),
+      platform: 'test',
+      modelId: 'stream-model',
+      keyId: null,
+      promptTokens: 1,
+      completionTokens: 1,
+    });
+    expect(getCachedStreamResponse('too-many-frames')).toBeNull();
+  });
+
+  it('enforces one byte budget across JSON and SSE cache entries', () => {
+    process.env.RESPONSE_CACHE_MAX_BYTES = '1048576';
+    expect(cacheMaxBytes()).toBe(1024 * 1024);
+    const base = Date.now();
+    store('budget-json', 'j'.repeat(600 * 1024), base);
+    expect(getCachedResponse('budget-json', base + 1)).not.toBeNull();
+    storeCachedStreamResponse('budget-stream', {
+      frames: ['s'.repeat(600 * 1024)],
+      platform: 'test',
+      modelId: 'stream-model',
+      keyId: null,
+      promptTokens: 1,
+      completionTokens: 1,
+    }, base + 2);
+    expect(getCacheMemoryBytes()).toBeLessThanOrEqual(1024 * 1024);
+    expect(getCachedResponse('budget-json', base + 3)).toBeNull();
+    expect(getCachedStreamResponse('budget-stream', base + 3)).not.toBeNull();
   });
 
   it('is stable regardless of object key order', () => {
@@ -681,6 +715,28 @@ describe('response cache', () => {
       expect(getCacheStats().entries).toBe(2);
       expect(getCachedResponse(keys[0]!, base + 10)).toBeNull();
       expect(getCachedResponse(keys[2]!, base + 10)).not.toBeNull();
+    });
+
+    it('bounds total bytes selected from SQLite during cache hydration', () => {
+      setSetting(CACHE_ENABLED_SETTING, 'true');
+      process.env.RESPONSE_CACHE_MAX_BYTES = '1048576';
+      const db = getDb();
+      const body = JSON.stringify(sampleBody('x'.repeat(700 * 1024)));
+      const now = Date.now();
+      const insert = db.prepare(`
+        INSERT INTO response_cache
+          (cache_key, body_json, platform, model_id, key_id, prompt_tokens, completion_tokens, hit_count, created_at_ms, last_hit_at_ms, expires_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      insert.run('legacy-large-old', body, 'test', 'large', null, 1, 1, 0, now, null, now + 60000);
+      insert.run('legacy-large-new', body, 'test', 'large', null, 1, 1, 0, now + 1, null, now + 60000);
+
+      __resetMemoryForTests();
+      loadCacheFromDb(now + 2);
+      expect(getCacheMemoryBytes()).toBeLessThanOrEqual(1024 * 1024);
+      expect(getCacheStats().entries).toBe(1);
+      expect(getCachedResponse('legacy-large-old', now + 2)).toBeNull();
+      expect(getCachedResponse('legacy-large-new', now + 2)).not.toBeNull();
     });
 
     it('drops the row when the LRU evicts the entry', () => {
