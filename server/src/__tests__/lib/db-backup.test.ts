@@ -310,17 +310,39 @@ describe('Hugging Face backup target', () => {
 
 
 describe('database backup memory ceiling', () => {
-  afterEach(() => restoreEnv());
+  afterEach(() => { vi.unstubAllGlobals(); restoreEnv(); });
 
   it('uses a safe default and rejects invalid or excessive configured limits', () => {
     delete process.env.FREEAPI_DB_BACKUP_MAX_BYTES;
     expect(maxDbBackupBytes()).toBe(512 * 1024 * 1024);
     process.env.FREEAPI_DB_BACKUP_MAX_BYTES = '1048576';
     expect(maxDbBackupBytes()).toBe(1024 * 1024);
-    for (const value of ['0', '-1', '1.5', 'invalid', '2147483649']) {
+    for (const value of ['0', '-1', '1.5', 'invalid', '536870913']) {
       process.env.FREEAPI_DB_BACKUP_MAX_BYTES = value;
       expect(maxDbBackupBytes()).toBe(512 * 1024 * 1024);
     }
+  });
+
+  it('coalesces concurrent backup requests into one memory-heavy operation', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'freeapi-backup-coalesce-'));
+    const dbPath = path.join(dir, 'freeapi.db');
+    process.env.ENCRYPTION_KEY = 'a'.repeat(64);
+    process.env.FREEAPI_DB_BACKUP_TARGET = 'https://storage.example.com/backup.bin';
+    process.env.FREEAPI_DB_BACKUP_TOKEN = 'backup_token';
+    const fetchMock = vi.fn(async () => {
+      await new Promise(resolve => setTimeout(resolve, 25));
+      return new Response('', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const db = new Database(dbPath);
+    db.exec('CREATE TABLE items (name TEXT NOT NULL); INSERT INTO items (name) VALUES (\'single-flight\')');
+    const first = backupDbNow(db, dbPath);
+    const second = backupDbNow(db, dbPath);
+    expect(second).toBe(first);
+    await Promise.all([first, second]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    db.close();
   });
 
   it('refuses to read a local database above the configured cap', async () => {
