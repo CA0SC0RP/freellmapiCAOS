@@ -200,6 +200,7 @@ const PLATFORMS_REQUIRING_REASONING_ECHO = new Set(['opencode']);
 const MAX_STREAM_OUTPUT_BYTES = 16 * 1024 * 1024;
 const MAX_STREAM_TOOL_CALLS = 128;
 const MAX_STREAM_PREAMBLE_CHUNKS = 128;
+const MAX_STREAM_PREAMBLE_BYTES = 2 * 1024 * 1024;
 
 
 function rememberReasoning(sessionKey: string | undefined, modelKey: string, reasoning: string) {
@@ -2639,6 +2640,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         let mode: 'undecided' | 'passthrough' | 'dialect' | 'json' = 'undecided';
         let heldText = '';
         const preamble: unknown[] = []; // role-only chunks held until flush
+        let preambleBytes = 0;
         const toolCallAcc = new Map<number, { id?: string; name: string; args: string }>();
         let upstreamFinish: string | null = null;
         let usageChunk: unknown = null;
@@ -2854,8 +2856,10 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
                 if (headerSent) {
                   writeChunk(cleaned);
                 } else {
-                  if (preamble.length >= MAX_STREAM_PREAMBLE_CHUNKS) {
-                    throw new Error(`provider stream exceeded the ${MAX_STREAM_PREAMBLE_CHUNKS}-chunk preamble safety limit`);
+                  const cleanedBytes = Buffer.byteLength(JSON.stringify(cleaned), 'utf8');
+                  preambleBytes += cleanedBytes;
+                  if (preamble.length >= MAX_STREAM_PREAMBLE_CHUNKS || preambleBytes > MAX_STREAM_PREAMBLE_BYTES) {
+                    throw new Error('provider stream exceeded the preamble buffering safety limit');
                   }
                   preamble.push(cleaned);
                 }
