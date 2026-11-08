@@ -42,6 +42,7 @@ import { claudeFamilyDiscoveryEntries, resolveListedClaudeAlias } from '../servi
 import { compressRequest, formatCompressionHeader } from '../services/compression/pipeline.js';
 import { applyDecisionRouting, routingStrategyHeader } from '../services/routing-decision.js';
 import { startStreamKeepalive, streamKeepaliveMs } from '../lib/stream-keepalive.js';
+import { StreamOutputBudget, MAX_STREAM_OUTPUT_BYTES, MAX_STREAM_TOOL_CALLS } from '../lib/stream-output-budget.js';
 
 export const proxyRouter = Router();
 
@@ -193,6 +194,12 @@ const REASONING_TTL_MS = 30 * 60 * 1000; // 30 min, matching sticky sessions
 // #255/#797); everywhere else only the turn we actually have a trace for is
 // touched, so no other provider's bytes change.
 const PLATFORMS_REQUIRING_REASONING_ECHO = new Set(['opencode']);
+
+// One upstream chat stream must not accumulate unbounded text, reasoning, or
+// tool-call arguments when a provider ignores its requested output limit.
+const MAX_STREAM_PREAMBLE_CHUNKS = 128;
+const MAX_STREAM_PREAMBLE_BYTES = 2 * 1024 * 1024;
+
 
 function rememberReasoning(sessionKey: string | undefined, modelKey: string, reasoning: string) {
   if (!sessionKey || !reasoning) return;
@@ -2578,6 +2585,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     // remembered per-session so a follow-up whose client stripped the field
     // can have it restored (see restore block above).
     let streamReasoning = '';
+    const streamOutputBudget = new StreamOutputBudget(MAX_STREAM_OUTPUT_BYTES);
+    const accountStreamOutput = (value: string) => streamOutputBudget.add(value);
     // Extra input tokens the injected handoff adds on this turn (0 when not
     // injected). Folded into the streaming success accounting, where token
     // counts are estimated; the non-stream path uses the provider's usage,
@@ -2629,6 +2638,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         let mode: 'undecided' | 'passthrough' | 'dialect' | 'json' = 'undecided';
         let heldText = '';
         const preamble: unknown[] = []; // role-only chunks held until flush
+        let preambleBytes = 0;
         const toolCallAcc = new Map<number, { id?: string; name: string; args: string }>();
         let upstreamFinish: string | null = null;
         let usageChunk: unknown = null;
@@ -2787,21 +2797,39 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
             // client stripped it can have it restored from session memory.
             // Shared with the #764 ttfb/token accounting below.
             const reasoning = streamReasoningText(anyChunk);
-            if (reasoning.length > 0) streamReasoning += reasoning;
+            if (reasoning.length > 0) {
+              accountStreamOutput(reasoning);
+              streamReasoning += reasoning;
+            }
 
             // Buffer tool_call deltas — emitted complete + repaired at end.
             for (const tc of choice.delta?.tool_calls ?? []) {
               const idx = tc.index ?? 0;
-              if (!toolCallAcc.has(idx)) toolCallAcc.set(idx, { id: undefined, name: '', args: '' });
+              if (!toolCallAcc.has(idx)) {
+                if (toolCallAcc.size >= MAX_STREAM_TOOL_CALLS) {
+                  throw new Error(`provider stream exceeded the ${MAX_STREAM_TOOL_CALLS}-tool-call safety limit`);
+                }
+                toolCallAcc.set(idx, { id: undefined, name: '', args: '' });
+              }
               const acc = toolCallAcc.get(idx)!;
-              if (tc.id && !acc.id) acc.id = tc.id;
-              if (tc.function?.name) acc.name += tc.function.name;
-              if (tc.function?.arguments) acc.args += tc.function.arguments;
+              if (tc.id && !acc.id) {
+                accountStreamOutput(tc.id);
+                acc.id = tc.id;
+              }
+              if (tc.function?.name) {
+                accountStreamOutput(tc.function.name);
+                acc.name += tc.function.name;
+              }
+              if (tc.function?.arguments) {
+                accountStreamOutput(tc.function.arguments);
+                acc.args += tc.function.arguments;
+              }
             }
 
             normalizeOutboundContent(anyChunk);
             sanitizeResponse(anyChunk);
             const text = typeof choice.delta?.content === 'string' ? choice.delta.content : '';
+            if (text.length > 0) accountStreamOutput(text);
 
             // #764: ttfb = first token of ANY kind, not just visible content —
             // reasoning models stream thinking long before the first answer
@@ -2826,7 +2854,16 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
                 // `usage: undefined` (dropped by JSON.stringify): it was held
                 // above and is re-emitted once, after our finish chunk.
                 const cleaned = { ...anyChunk, usage: undefined, choices: [{ ...choice, delta: { ...choice.delta, tool_calls: undefined }, finish_reason: null }] };
-                if (headerSent) writeChunk(cleaned); else preamble.push(cleaned);
+                if (headerSent) {
+                  writeChunk(cleaned);
+                } else {
+                  const cleanedBytes = Buffer.byteLength(JSON.stringify(cleaned), 'utf8');
+                  preambleBytes += cleanedBytes;
+                  if (preamble.length >= MAX_STREAM_PREAMBLE_CHUNKS || preambleBytes > MAX_STREAM_PREAMBLE_BYTES) {
+                    throw new Error('provider stream exceeded the preamble buffering safety limit');
+                  }
+                  preamble.push(cleaned);
+                }
               }
               continue;
             }
@@ -2890,6 +2927,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
             const rescue = rescueInlineToolCalls(heldText, new Set((tools ?? []).map(t => t.function.name)));
             if (rescue.detected) {
               if (!rescue.calls) throw new Error(`unparseable inline tool-call dialect from ${route.displayName}: ${heldText.slice(0, 120)}`);
+              if (toolCallAcc.size + rescue.calls.length > MAX_STREAM_TOOL_CALLS) {
+                throw new Error(`provider stream exceeded the ${MAX_STREAM_TOOL_CALLS}-tool-call safety limit`);
+              }
               let rescuedIds = 0;
               for (const c of rescue.calls) {
                 completedCalls.push({ id: `call_rescued_${++rescuedIds}`, type: 'function', function: { name: c.name, arguments: repairToolArguments(c.arguments, schemas.get(c.name)) } });

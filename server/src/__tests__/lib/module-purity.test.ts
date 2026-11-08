@@ -45,6 +45,8 @@ const PURE_MODULES = [
   'search-platforms.ts',
   // SSE keep-alive helper (#1642); env is injected, the response is a callback.
   'stream-keepalive.ts',
+  // Per-upstream stream output accounting; state is local to each budget instance.
+  'stream-output-budget.ts',
   'structured-output.ts',
   'tool-args.ts',
   'tool-call-rescue.ts',
